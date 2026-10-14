@@ -70,7 +70,7 @@ describe('configuração e prévia de checklists', () => {
         onCreate={vi.fn()}
       />,
     );
-    expect(html.match(/Editar checklist/g)).toHaveLength(2);
+    expect(html.match(/Editar modelo/g)).toHaveLength(2);
     expect(html.match(/Ver prévia/g)).toHaveLength(3);
     expect(html).toContain('Versões anteriores (1)');
   });
@@ -83,7 +83,7 @@ describe('configuração e prévia de checklists', () => {
         run={vi.fn()}
       />,
     );
-    expect(html).toContain('Editar checklist');
+    expect(html).toContain('Editar modelo');
     expect(html).toContain('value="Toalhas de banho"');
     expect(html).toContain('Aumentar quantidade de toalhas de banho');
     expect(html).toContain('Diminuir quantidade de toalhas de banho');

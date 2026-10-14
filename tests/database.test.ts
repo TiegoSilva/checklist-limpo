@@ -979,7 +979,7 @@ describe.sequential('operações reais em PostgreSQL com RLS', () => {
     await asUser(admin);
   });
 });
-type ItemLike = { id: string };
+type ItemLike = { id: string; expected?: number };
 
 describe.sequential('check-in e agenda compartilhada', () => {
   let agendaUnit: string;
@@ -1262,5 +1262,494 @@ describe.sequential('check-in e agenda compartilhada', () => {
         }),
       ]),
     ).rejects.toThrow(/já foi iniciada/);
+  });
+});
+
+describe.sequential('ordens de serviço, modelos e estadia', () => {
+  let workUnit: string,
+    modelIn: string,
+    modelOut: string,
+    inOrder: string,
+    outOrder: string,
+    inActivity: string,
+    outActivity: string;
+  const event = '00000000-0000-4000-8000-000000000091';
+  const booking = () => ({
+    event_id: event,
+    unit_id: workUnit,
+    order_type: 'checkin',
+    execution_mode: 'checklist',
+    template_id: modelIn,
+    assignee: worker,
+    checkout_assignee: worker,
+    checkout_execution_mode: 'checklist',
+    checkout_template_id: modelOut,
+    guest_name: 'Hóspede privado',
+    guests: 3,
+    checkin: '2020-02-01',
+    duration_nights: 3,
+  });
+  it('cria exatamente duas ordens e duas execuções com saída calculada pelas diárias', async () => {
+    await asUser(admin);
+    workUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Unidade ordens',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: workUnit,
+        kind: 'cleaning',
+        items: [sharedTowel],
+      }),
+    ]);
+    modelIn = (
+      await db.query<{ id: string }>(
+        "select id from checklist_template_versions where unit_id=$1 and kind='cleaning' order by version desc limit 1",
+        [workUnit],
+      )
+    ).rows[0].id;
+    modelOut = (
+      await db.query<{ id: string }>(
+        "select id from checklist_template_versions where unit_id=$1 and kind='inspection' order by version desc limit 1",
+        [workUnit],
+      )
+    ).rows[0].id;
+    inOrder = (await rpc('create_work_order', [
+      JSON.stringify(booking()),
+    ])) as string;
+    expect(await rpc('create_work_order', [JSON.stringify(booking())])).toBe(
+      inOrder,
+    );
+    const orders = (
+      await db.query<{
+        id: string;
+        order_type: string;
+        activity_id: string;
+        parent_order_id: string;
+        due_at: Date;
+      }>(
+        'select * from service_orders where reservation_id=$1 order by order_type',
+        [event],
+      )
+    ).rows;
+    expect(orders).toHaveLength(2);
+    expect(orders[0].order_type).toBe('checkin');
+    outOrder = orders[1].id;
+    inActivity = orders[0].activity_id;
+    outActivity = orders[1].activity_id;
+    expect(orders[1].parent_order_id).toBe(inOrder);
+    expect(new Date(orders[0].due_at).toISOString()).toBe(
+      '2020-02-01T17:00:00.000Z',
+    );
+    expect(new Date(orders[1].due_at).toISOString()).toBe(
+      '2020-02-04T15:00:00.000Z',
+    );
+    const activities = (
+      await db.query<{ occupancy: number; items: ItemLike[] }>(
+        'select * from activities where unit_id=$1',
+        [workUnit],
+      )
+    ).rows;
+    expect(activities).toHaveLength(2);
+    expect(
+      activities.every((a) => a.occupancy === 3 && a.items[0].expected === 3),
+    ).toBe(true);
+    const agenda = (
+      await db.query<{
+        duration_nights: number;
+        checkin_order_id: string;
+        checkout_order_id: string;
+      }>('select * from team_agenda where id=$1', [event])
+    ).rows[0];
+    expect(agenda.duration_nights).toBe(3);
+    expect(agenda.checkout_order_id).toBe(outOrder);
+    expect(
+      (
+        await db.query<{ operational_status: string }>(
+          'select operational_status from units where id=$1',
+          [workUnit],
+        )
+      ).rows[0].operational_status,
+    ).toBe('unavailable');
+  });
+  it('mantém a versão do modelo e as quantidades da OS após editar o modelo', async () => {
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: workUnit,
+        kind: 'cleaning',
+        items: [{ ...sharedTowel, quantity_per_guest: 2 }],
+      }),
+    ]);
+    const before = (
+      await db.query<{ template_id: string; items: ItemLike[] }>(
+        'select * from activities where id=$1',
+        [inActivity],
+      )
+    ).rows[0];
+    expect(before.template_id).toBe(modelIn);
+    expect(before.items[0].expected).toBe(3);
+    expect(
+      (
+        await db.query<{ template_id: string }>(
+          'select template_id from service_orders where id=$1',
+          [inOrder],
+        )
+      ).rows[0].template_id,
+    ).toBe(modelIn);
+  });
+  it('executa e aprova o check-in antes da saída, sem exigir concluir o checkout futuro', async () => {
+    await asUser(worker);
+    await expect(
+      rpc('service_action', [
+        'start',
+        JSON.stringify({ id: inOrder, revision: 0 }),
+      ]),
+    ).rejects.toThrow(/pelo checklist/);
+    await action(inActivity, 'start');
+    await action(inActivity, 'save', {
+      responses: {
+        'towel-shared': { confirmed: true, found: 3, condition: 'ok' },
+      },
+    });
+    await action(inActivity, 'submit');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [inOrder],
+        )
+      ).rows[0].status,
+    ).toBe('review');
+    await expect(action(inActivity, 'approve')).rejects.toThrow(
+      /Autoaprovação/,
+    );
+    await asUser(admin);
+    await action(inActivity, 'approve');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [inOrder],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+    expect(
+      (
+        await db.query<{ operational_status: string; prepared_for: number }>(
+          'select * from units where id=$1',
+          [workUnit],
+        )
+      ).rows[0],
+    ).toMatchObject({ operational_status: 'ready', prepared_for: 3 });
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [outOrder],
+        )
+      ).rows[0].status,
+    ).toBe('assigned');
+  });
+  it('prorroga a saída depois do check-in concluído sem mover ou duplicar a ordem de entrada', async () => {
+    const before = (
+      await db.query<{ due_at: Date }>(
+        'select due_at from service_orders where id=$1',
+        [inOrder],
+      )
+    ).rows[0];
+    await rpc('reschedule_checkout', [
+      event,
+      0,
+      JSON.stringify({
+        checkout: '2020-02-05',
+        reason: 'Estadia estendida pelo hóspede',
+      }),
+    ]);
+    const after = (
+      await db.query<{ due_at: Date }>(
+        'select due_at from service_orders where id=$1',
+        [inOrder],
+      )
+    ).rows[0];
+    expect(new Date(after.due_at).toISOString()).toBe(
+      new Date(before.due_at).toISOString(),
+    );
+    expect(
+      (
+        await db.query<{ duration_nights: number }>(
+          'select duration_nights from team_agenda where id=$1',
+          [event],
+        )
+      ).rows[0].duration_nights,
+    ).toBe(4);
+    expect(
+      new Date(
+        (
+          await db.query<{ due_at: Date }>(
+            'select due_at from activities where id=$1',
+            [outActivity],
+          )
+        ).rows[0].due_at,
+      ).toISOString(),
+    ).toBe('2020-02-05T15:00:00.000Z');
+    expect(
+      (
+        await db.query(
+          'select id from service_orders where reservation_id=$1',
+          [event],
+        )
+      ).rows,
+    ).toHaveLength(2);
+  });
+  it('envia o checkout para revisão e bloqueia alterar sua data depois de iniciado', async () => {
+    await asUser(worker);
+    await action(outActivity, 'start');
+    await asUser(admin);
+    await expect(
+      rpc('reschedule_checkout', [
+        event,
+        1,
+        JSON.stringify({ checkout: '2020-02-06', reason: 'Saída já iniciada' }),
+      ]),
+    ).rejects.toThrow(/já foi iniciado/);
+    await asUser(worker);
+    await action(outActivity, 'save', {
+      responses: {
+        'towel-shared': { confirmed: true, found: 3, condition: 'ok' },
+      },
+    });
+    await action(outActivity, 'submit');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [outOrder],
+        )
+      ).rows[0].status,
+    ).toBe('review');
+    await asUser(admin);
+    await action(outActivity, 'approve');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [outOrder],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+  });
+  it('cria check-in e checkout como tarefas simples mesmo sem modelos cadastrados', async () => {
+    const taskUnit = await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Hospedagem por tarefa',
+        capacity: 4,
+        base_occupancy: 2,
+      }),
+    ]);
+    const id = await rpc('create_work_order', [
+      JSON.stringify({
+        ...booking(),
+        event_id: '00000000-0000-4000-8000-000000000092',
+        unit_id: taskUnit,
+        execution_mode: 'task',
+        checkout_execution_mode: 'task',
+        checkin: '2099-03-30',
+        duration_nights: 2,
+      }),
+    ]);
+    const orders = (
+      await db.query<{ execution_mode: string; activity_id: string }>(
+        'select * from service_orders where reservation_id=$1',
+        [id],
+      )
+    ).rows;
+    expect(orders).toHaveLength(2);
+    expect(
+      orders.every((s) => s.execution_mode === 'task' && !s.activity_id),
+    ).toBe(true);
+    expect(
+      (await db.query('select * from activities where unit_id=$1', [taskUnit]))
+        .rows,
+    ).toHaveLength(0);
+    await asUser(worker);
+    await expect(
+      rpc('service_action', ['start', JSON.stringify({ id, revision: 0 })]),
+    ).rejects.toThrow(/data futura/);
+    await asUser(admin);
+  });
+  it('executa um modelo em uma OS geral com revisão sem exigir ciclo de hospedagem', async () => {
+    const id = await rpc('create_work_order', [
+      JSON.stringify({
+        event_id: '00000000-0000-4000-8000-000000000093',
+        unit_id: workUnit,
+        title: 'Conferência extraordinária',
+        order_type: 'general',
+        execution_mode: 'checklist',
+        template_id: modelOut,
+        assignee: worker,
+        due_at: '2020-02-10T15:00:00Z',
+        occupancy: 2,
+      }),
+    ]);
+    const a = (
+      await db.query<{ activity_id: string }>(
+        'select activity_id from service_orders where id=$1',
+        [id],
+      )
+    ).rows[0].activity_id;
+    await asUser(worker);
+    await action(a, 'start');
+    await action(a, 'save', {
+      responses: {
+        'towel-shared': { confirmed: true, found: 2, condition: 'ok' },
+      },
+    });
+    await action(a, 'submit');
+    await asUser(admin);
+    await action(a, 'approve');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [id],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+  });
+  it('conclui o check-in como tarefa e permite editar apenas a saída vinculada', async () => {
+    await asUser(admin);
+    const taskUnit = await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Tarefa concluída de check-in',
+        capacity: 4,
+        base_occupancy: 2,
+      }),
+    ]);
+    const id = (await rpc('create_work_order', [
+      JSON.stringify({
+        ...booking(),
+        event_id: '00000000-0000-4000-8000-000000000095',
+        unit_id: taskUnit,
+        execution_mode: 'task',
+        checkout_execution_mode: 'task',
+        checkin: '2020-06-01',
+        duration_nights: 2,
+      }),
+    ])) as string;
+    await asUser(worker);
+    await rpc('service_action', ['start', JSON.stringify({ id, revision: 0 })]);
+    await expect(
+      rpc('service_action', [
+        'submit',
+        JSON.stringify({
+          id,
+          revision: 1,
+          note: 'Entrada conferida e hóspede recebido',
+        }),
+      ]),
+    ).rejects.toThrow(/fotografia/);
+    const file = '00000000-0000-4000-8000-000000000096';
+    await db.query(
+      "insert into storage.objects(bucket_id,name) values('service-evidence',$1)",
+      [`${id}/${file}`],
+    );
+    await db.exec('reset role;set role service_role;');
+    await rpc('receive_service_evidence', [worker, id, file, 'c'.repeat(64)]);
+    await asUser(worker);
+    await rpc('service_action', [
+      'submit',
+      JSON.stringify({
+        id,
+        revision: 1,
+        note: 'Entrada conferida e hóspede recebido',
+      }),
+    ]);
+    await asUser(admin);
+    await rpc('service_action', [
+      'approve',
+      JSON.stringify({ id, revision: 2 }),
+    ]);
+    await rpc('reschedule_checkout', [
+      id,
+      0,
+      JSON.stringify({
+        checkout: '2020-06-05',
+        reason: 'Hóspede estendeu sua estadia',
+      }),
+    ]);
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [id],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+    const out = (
+      await db.query<{ due_at: Date }>(
+        'select due_at from service_orders where parent_order_id=$1',
+        [id],
+      )
+    ).rows[0];
+    expect(new Date(out.due_at).toISOString()).toBe('2020-06-05T15:00:00.000Z');
+  });
+  it('reverte a criação inteira quando a duração ou o modelo de checkout é inválido', async () => {
+    const next = {
+      ...booking(),
+      event_id: '00000000-0000-4000-8000-000000000094',
+      checkin: '2020-04-01',
+    };
+    await expect(
+      rpc('create_work_order', [
+        JSON.stringify({ ...next, duration_nights: 0 }),
+      ]),
+    ).rejects.toThrow(/diárias/);
+    await expect(
+      rpc('create_work_order', [
+        JSON.stringify({ ...next, checkout_template_id: modelIn }),
+      ]),
+    ).rejects.toThrow(/Modelo incompatível/);
+    expect(
+      (
+        await db.query('select id from service_orders where id=$1', [
+          next.event_id,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query('select id from reservations where id=$1', [
+          next.event_id,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await expect(
+      rpc('attach_order_checklist', [
+        workUnit,
+        null,
+        'general',
+        worker,
+        '2020-02-01',
+        2,
+        modelIn,
+        'Invasão',
+      ]),
+    ).rejects.toThrow(/permission denied/);
+    await asUser(outsider);
+    await expect(
+      rpc('create_work_order', [JSON.stringify(next)]),
+    ).rejects.toThrow(/Acesso negado/);
+    await asUser(admin);
   });
 });

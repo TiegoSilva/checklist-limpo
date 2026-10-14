@@ -15,6 +15,7 @@ import {
 import { Modal, Form, Badge } from '../components';
 import {
   dateTime,
+  dayKey,
   progress,
   type Data,
   type Activity,
@@ -119,10 +120,30 @@ export default function ActivityDetail({
     (r) => r.activity_id === a.id,
   );
   const findings = data.findings.filter((f) => f.activity_id === a.id);
+  const order = data.service_orders.find((s) => s.activity_id === a.id);
+  const model = data.checklist_template_versions.find(
+    (t) => t.id === order?.template_id,
+  );
+  const booking = data.team_agenda.find((r) => r.id === order?.reservation_id);
+  const futureOrder = Boolean(
+    order &&
+    ['checkin', 'checkout'].includes(order.order_type ?? '') &&
+    dayKey(new Date(a.due_at)) > dayKey(new Date()),
+  );
   const cycle = data.preparation_cycles.find((c) => c.id === a.cycle_id);
   const stay = data.stays.find((s) => s.id === cycle?.stay_id);
   return (
     <Modal title={`${unitName(a.unit_id)} · ${a.title}`} onClose={onClose} wide>
+      {order && (
+        <p className="info-card">
+          Ordem de serviço · Modelo v{model?.version ?? '—'}
+          {booking
+            ? ` · ${booking.guests} hóspedes · ${booking.duration_nights} diária(s) · Saída ${booking.checkout}`
+            : ''}
+          {order.parent_order_id ? ' · Checkout vinculado ao check-in' : ''}.
+          Esta execução usa a versão escolhida ao criar a ordem.
+        </p>
+      )}
       <div className="detail-top">
         <Badge status={a.status} />
         <span>
@@ -133,7 +154,9 @@ export default function ActivityDetail({
       <div className="info-card">
         <Users size={21} />
         <div>
-          <strong>Preparação para {a.occupancy} hóspedes</strong>
+          <strong>
+            {order ? 'Ocupação da ordem' : 'Preparação'}: {a.occupancy} hóspedes
+          </strong>
           <p>
             {cycle?.occupancy_source === 'base'
               ? 'Padrão-base da unidade'
@@ -199,12 +222,23 @@ export default function ActivityDetail({
       {pending && (
         <button
           className="button primary full"
-          disabled={busy}
+          disabled={busy || futureOrder}
           onClick={() => void run(() => mutate('start'))}
         >
           <Sparkles size={18} />
-          Iniciar {a.kind === 'inspection' ? 'vistoria' : 'arrumação'}
+          Iniciar{' '}
+          {order
+            ? 'ordem de serviço'
+            : a.kind === 'inspection'
+              ? 'vistoria'
+              : 'arrumação'}
         </button>
+      )}
+      {pending && futureOrder && (
+        <p className="info-card">
+          Esta ordem está programada para {dateTime(a.due_at)}. A execução
+          estará disponível no dia previsto.
+        </p>
       )}
       {[...new Set(a.items.map((i) => i.room))].map((room) => (
         <section className="room-section" key={room}>
@@ -580,14 +614,14 @@ export default function ActivityDetail({
                     await mutate('submit');
                     onClose();
                   },
-                  a.kind === 'inspection'
+                  !order && a.kind === 'inspection'
                     ? 'Vistoria concluída.'
                     : 'Enviado para aprovação.',
                 )
               }
             >
               <Send size={17} />
-              {a.kind === 'inspection'
+              {!order && a.kind === 'inspection'
                 ? 'Concluir vistoria'
                 : 'Enviar para aprovação'}
             </button>

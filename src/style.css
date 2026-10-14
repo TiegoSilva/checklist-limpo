@@ -67,6 +67,20 @@
 .stay-form .form > button {
   grid-column: 1 / -1;
 }
+.work-order-form .field > .quantity-stepper {
+  width: auto;
+  align-self: flex-start;
+}
+.work-order-form .quantity-stepper input {
+  width: 3.5rem;
+}
+.work-order-form .info-card {
+  display: block;
+  line-height: 1.6;
+}
+.work-order-form .info-card strong {
+  white-space: nowrap;
+}
 .checklist-item.count-inline {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

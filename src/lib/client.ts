@@ -50,6 +50,11 @@ export async function loadData(): Promise<Data> {
     properties: data.properties,
     team_agenda: data.team_agenda,
     agenda_ready: agendaReady,
+    service_orders: data.service_orders.filter(
+      (s) =>
+        s.assignee === session.user.id &&
+        !['approved', 'cancelled'].includes(s.status),
+    ),
     activities: data.activities.filter(
       (a) =>
         a.assignee === session.user.id &&
@@ -68,6 +73,11 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (name === 'create_work_order' && error.code === 'PGRST202') {
+      throw new Error(
+        'Aplique a migração 202610140007_work_orders.sql no Supabase para ativar as ordens com modelos e o checkout vinculado.',
+      );
+    }
     if (
       ['register_checkin', 'reschedule_checkout'].includes(name) &&
       error.code === 'PGRST202'

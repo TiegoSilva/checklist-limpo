@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { Camera, Image } from 'lucide-react';
 import { Form, Modal } from './components';
-import { dateTime, statusLabels, type Data, type Service } from './domain';
+import {
+  dateTime,
+  dayKey,
+  statusLabels,
+  type Data,
+  type Service,
+} from './domain';
 import { rpc, signedImage, uploadPhoto } from './lib/client';
 type Run = (fn: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function MemberEditor({
@@ -158,6 +164,10 @@ export function ServiceDetail({
 }) {
   const [image, setImage] = useState<string>();
   const photos = data.service_evidence.filter((e) => e.service_id === s.id);
+  const stay = data.team_agenda.find((r) => r.id === s.reservation_id);
+  const future =
+    ['checkin', 'checkout'].includes(s.order_type ?? '') &&
+    dayKey(new Date(s.due_at)) > dayKey(new Date());
   return (
     <Modal title={s.title} onClose={onClose} wide>
       <div className="detail-top">
@@ -168,6 +178,19 @@ export function ServiceDetail({
         {s.blocking && <span className="error-text">Impede a liberação</span>}
       </div>
       <p className="modal-description">{s.description}</p>
+      {future && (
+        <p className="info-card">
+          Esta ordem estará disponível para execução no dia {dateTime(s.due_at)}
+          .
+        </p>
+      )}
+      <p className="info-card">
+        Tarefa simples
+        {s.parent_order_id ? ' · Checkout vinculado à ordem de check-in' : ''}
+        {stay
+          ? ` · ${stay.guests} hóspedes · ${stay.duration_nights} diária(s) · Saída ${stay.checkout}`
+          : ''}
+      </p>
       {s.completion_note && (
         <div className="info-card">
           <p>
@@ -223,7 +246,7 @@ export function ServiceDetail({
             name: 'action',
             label: 'Próxima ação',
             options: [
-              ...(s.assignee === user
+              ...(s.assignee === user && !future
                 ? ['assigned', 'rejected'].includes(s.status)
                   ? [{ value: 'start', label: 'Iniciar execução' }]
                   : s.status === 'in_progress'

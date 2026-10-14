@@ -1,5 +1,7 @@
 # Check-in, checkout automático e agenda
 
+Este guia descreve o fluxo introduzido na migração 006. A migração 007 reorganiza as novas operações em ordens de serviço e move apenas o checkout ao editar a saída. Consulte [Modelos e ordens](MODELOS_E_ORDENS.md).
+
 ## Ativar no Supabase
 
 Em um banco com as migrações 001 a 005 aplicadas, execute uma vez `supabase/migrations/202610140006_stay_agenda.sql` no SQL Editor. Em uma instalação nova, aplique todas as seis na ordem dos nomes. Não reaplique migrações anteriores.

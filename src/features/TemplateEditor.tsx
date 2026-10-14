@@ -337,7 +337,9 @@ export default function TemplateEditor({
   );
   return (
     <Modal
-      title={existing ? 'Editar checklist' : 'Novo checklist'}
+      title={
+        existing ? 'Editar modelo de checklist' : 'Novo modelo de checklist'
+      }
       onClose={onClose}
       wide
     >

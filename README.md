@@ -111,4 +111,6 @@ Veja [arquitetura](docs/ARQUITETURA.md) e [cobertura e pendências](docs/IMPLEME
 
 Para atualizar um banco já instalado, consulte [Edição, itens compartilhados e prévia](docs/ATUALIZACAO_CHECKLISTS.md). A migração `202610140005_shared_checklist_items.sql` habilita a edição dos padrões e o compartilhamento de itens com quantidade entre check-in e checkout.
 
-O novo fluxo **Registrar check-in** agenda automaticamente o checkout com vistoria e limpeza. A agenda é compartilhada por propriedade, e o gestor pode editar a saída movendo as mesmas tarefas. Aplique a migração `202610140006_stay_agenda.sql`, conforme [Agenda e checkout automático](docs/AGENDA_CHECKOUT.md).
+A migração `202610140006_stay_agenda.sql` estabeleceu a agenda compartilhada por propriedade e a edição da saída. Ela é pré-requisito para a organização em ordens de serviço descrita abaixo. Veja [o guia da agenda](docs/AGENDA_CHECKOUT.md).
+
+Com a migração `202610140007_work_orders.sql`, cada checklist é um **modelo** e cada ordem executa uma versão desse modelo ou uma tarefa simples. Criar uma ordem de check-in informa **diárias e hóspedes** e cria uma ordem de checkout vinculada. Alterar a saída move apenas o checkout, preservando o check-in concluído. Consulte [Modelos e ordens de serviço](docs/MODELOS_E_ORDENS.md) para ativar e usar o novo fluxo.

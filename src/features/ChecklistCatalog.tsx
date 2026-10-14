@@ -42,7 +42,7 @@ export default function ChecklistCatalog({
         {!historical && (
           <button className="button secondary" onClick={() => onEdit(t.id)}>
             <Pencil size={16} />
-            Editar checklist
+            Editar modelo
           </button>
         )}
       </div>
@@ -55,9 +55,9 @@ export default function ChecklistCatalog({
     <section className="panel">
       <div className="section-heading">
         <div>
-          <h2>Configuração de checklists</h2>
+          <h2>Modelos de checklist</h2>
           <p>
-            Edite os padrões e confira a prévia antes de usar. Itens com
+            Cada modelo pode ser usado em ordens de serviço. Itens com
             quantidade são compartilhados entre check-in e checkout.
           </p>
         </div>
@@ -69,7 +69,7 @@ export default function ChecklistCatalog({
           title="O padrão da sua hospitalidade"
           description="Cadastre os itens uma vez e mantenha check-in e checkout alinhados."
           action={onCreate}
-          label="Criar checklist"
+          label="Criar modelo"
         />
       )}
       {historical.length > 0 && (
