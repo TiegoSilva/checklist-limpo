@@ -13,7 +13,7 @@ Copy-Item .env.example .env.local
 npm.cmd run dev
 ```
 
-Abra http://127.0.0.1:5173. Sem variáveis, a interface exibe instruções de configuração e indicadores vazios. O Vite também atende `/api/health`, `/api/operation`, `/api/evidence` e `/api/notifications` durante o desenvolvimento. Segredos são carregados somente no processo Node.
+Abra http://127.0.0.1:5173. Visitantes sem sessão veem somente o painel de login, inclusive ao abrir links internos. O portal só é montado após a restauração da sessão. Sem variáveis, a tela de login informa indisponibilidade de acesso; siga a configuração abaixo. O Vite também atende `/api/health`, `/api/operation`, `/api/evidence` e `/api/notifications` durante o desenvolvimento. Segredos são carregados somente no processo Node.
 
 ```powershell
 npm.cmd test

@@ -20,7 +20,6 @@ import {
   House,
   LayoutDashboard,
   ListChecks,
-  LogIn,
   LogOut,
   Menu,
   Plus,
@@ -52,6 +51,7 @@ import { MemberEditor, ServiceDetail } from './management';
 import TemplateEditor from './features/TemplateEditor';
 import ActivityDetail from './features/ActivityDetail';
 import Reports from './features/Reports';
+import LoginPage from './features/LoginPage';
 
 const navigation = [
   { path: '/', label: 'Visão geral', icon: LayoutDashboard },
@@ -78,8 +78,53 @@ const dueDefault = () => {
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [authReady, setAuthReady] = useState(!configured);
-  const [login, setLogin] = useState(false);
+  const [ready, setReady] = useState(!configured);
+  const [sessionError, setSessionError] = useState('');
+  const qc = useQueryClient();
+
+  useEffect(() => {
+    if (!supabase) return;
+    let mounted = true;
+    let authEventReceived = false;
+    const unavailable =
+      'Não foi possível verificar seu acesso. Entre novamente.';
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!mounted || authEventReceived) return;
+        setSession(error ? null : data.session);
+        setSessionError(error ? unavailable : '');
+        setReady(true);
+      })
+      .catch(() => {
+        if (!mounted || authEventReceived) return;
+        setSession(null);
+        setSessionError(unavailable);
+        setReady(true);
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      authEventReceived = true;
+      setSession(nextSession);
+      setSessionError('');
+      setReady(true);
+      if (!nextSession) qc.clear();
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [qc]);
+
+  // O portal e suas consultas só são montados depois de restaurar a sessão.
+  if (!ready || !session)
+    return <LoginPage loading={!ready} sessionError={sessionError} />;
+  return <Portal key={session.user.id} session={session} />;
+}
+
+function Portal({ session }: { session: Session }) {
   const [sidebar, setSidebar] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [message, setMessage] = useState('');
@@ -121,23 +166,6 @@ export default function App() {
     )
       navigate('/meu-dia', { replace: true });
   }, [session, query.isPending, memberships.length, manager, path, navigate]);
-  useEffect(() => {
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setAuthReady(true);
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      if (!s) {
-        qc.clear();
-        setSelected(null);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [qc]);
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     window.addEventListener('online', update);
@@ -216,10 +244,6 @@ export default function App() {
     [qc],
   );
   const needSession = () => {
-    if (!session) {
-      configured ? setLogin(true) : setModal('setup');
-      return false;
-    }
     if (!profile?.active) {
       setError(
         'Seu perfil está desativado. Entre em contato com o administrador.',
@@ -416,10 +440,7 @@ export default function App() {
         <span className="nav-caption">OPERAÇÃO</span>
         <nav aria-label="Navegação principal">
           {navigation
-            .filter(
-              (n) =>
-                !session || manager || !['/', '/aprovacoes'].includes(n.path),
-            )
+            .filter((n) => manager || !['/', '/aprovacoes'].includes(n.path))
             .map((n) => (
               <NavLink
                 key={n.path}
@@ -435,12 +456,12 @@ export default function App() {
               </NavLink>
             ))}
         </nav>
-        {(!session || manager) && (
+        {manager && (
           <>
             <span className="nav-caption">GESTÃO</span>
             <nav aria-label="Gestão">
               {management
-                .filter((n) => n.path !== '/equipe' || admin || !session)
+                .filter((n) => n.path !== '/equipe' || admin)
                 .map((n) => (
                   <NavLink
                     key={n.path}
@@ -470,16 +491,7 @@ export default function App() {
             <CircleHelp size={18} />
             Preferências e ajuda
           </NavLink>
-          <button
-            className="user-button"
-            onClick={() =>
-              session
-                ? setModal('account')
-                : configured
-                  ? setLogin(true)
-                  : setModal('setup')
-            }
-          >
+          <button className="user-button" onClick={() => setModal('account')}>
             <span className="avatar">{profile?.name.slice(0, 1) ?? 'A'}</span>
             <span>
               <strong>{profile?.name ?? 'Bem-vindo à AJA'}</strong>
@@ -529,7 +541,7 @@ export default function App() {
             <button
               className="avatar"
               aria-label="Abrir conta"
-              onClick={() => (session ? setModal('account') : setLogin(true))}
+              onClick={() => setModal('account')}
             >
               {profile?.name.slice(0, 1) ?? 'A'}
             </button>
@@ -557,7 +569,7 @@ export default function App() {
                       : 'Organização, clareza e cuidado em cada etapa.'}
               </p>
             </div>
-            {(!session || manager) &&
+            {manager &&
               [
                 '/',
                 '/atividades',
@@ -576,39 +588,6 @@ export default function App() {
                 </button>
               )}
           </div>
-          {!configured && (
-            <div className="setup-banner">
-              <span className="setup-banner-icon">
-                <ShieldCheck size={22} />
-              </span>
-              <div>
-                <strong>Vamos preparar sua operação?</strong>
-                <p>
-                  Conecte o Supabase para cadastrar sua equipe e começar a
-                  trabalhar com dados reais.
-                </p>
-              </div>
-              <button className="text-button" onClick={() => setModal('setup')}>
-                Ver configuração
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          )}
-          {configured && authReady && !session && (
-            <div className="setup-banner">
-              <LogIn size={24} />
-              <div>
-                <strong>Entre para acessar sua operação</strong>
-                <p>
-                  Use sua conta individual para consultar as propriedades
-                  autorizadas.
-                </p>
-              </div>
-              <button className="button primary" onClick={() => setLogin(true)}>
-                Entrar
-              </button>
-            </div>
-          )}
           {session &&
             !query.isPending &&
             !query.error &&
@@ -1577,41 +1556,6 @@ export default function App() {
           <CheckCheck size={20} />
           {message}
         </div>
-      )}
-      {login && (
-        <Modal title="Bem-vindo de volta" onClose={() => setLogin(false)}>
-          {configured ? (
-            <>
-              <p className="modal-description">
-                Entre com sua conta individual da AJA Anfitrião.
-              </p>
-              <Form
-                fields={[
-                  { name: 'email', label: 'E-mail', type: 'email' },
-                  { name: 'password', label: 'Senha', type: 'password' },
-                ]}
-                submit="Entrar"
-                onSubmit={async (v) => {
-                  if (
-                    await run(async () => {
-                      const { error } = await supabase!.auth.signInWithPassword(
-                        { email: v.email, password: v.password },
-                      );
-                      if (error) throw error;
-                    }, 'Acesso autorizado.')
-                  )
-                    setLogin(false);
-                }}
-              />
-              <p className="muted">
-                Precisa de acesso ou recuperou sua senha? Solicite o convite ou
-                recuperação ao administrador.
-              </p>
-            </>
-          ) : (
-            <Setup />
-          )}
-        </Modal>
       )}
       {modal === 'setup' && (
         <Modal

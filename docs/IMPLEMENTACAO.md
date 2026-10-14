@@ -1,6 +1,6 @@
 # Cobertura da implementação
 
-Esta entrega é uma implementação inicial funcional dos fluxos centrais, com integração real preparada. **Não equivale à conclusão integral das seis fases do briefing nem à homologação de produção.** Sem projeto Supabase configurado, não há operação remota ativa. As telas vazias são intencionais e não simulam sucesso de gravação.
+Esta entrega é uma implementação inicial funcional dos fluxos centrais, com integração real preparada. **Não equivale à conclusão integral das seis fases do briefing nem à homologação de produção.** Sem projeto Supabase configurado, não há operação remota ativa. Visitantes veem somente a tela de login; o portal e suas consultas são montados apenas com sessão autenticada. Não há preview público do portal.
 
 ## Fases
 
@@ -35,13 +35,14 @@ Cobertura atual:
 - Ordem de serviço exige foto, texto e outro aprovador.
 - Auditoria registra ator e horário do banco.
 - Ordenação diária, datas de São Paulo e exportação CSV com proteção contra fórmulas.
+- Tela exclusiva de login sem sessão, inclusive em links internos, durante a restauração do acesso e em caso de falha de sessão. Consultas operacionais não são iniciadas na tela pública.
 
 **Não validados automaticamente:** Supabase Auth HTTP, upload/download HTTP com Storage real, cálculo do hash pela API em integração, Realtime, assinatura/entrega push real, sessão offline e recuperação IndexedDB em navegador, acessibilidade completa e deploy Vercel. Não considerar esses itens homologados por causa dos testes locais.
 
 ## Como verificar visualmente
 
 1. Execute `npm run dev` e abra a URL local.
-2. Navegue pelo dashboard e pelas telas do menu. Sem configuração, indicadores devem ficar zerados e ações devem orientar a conexão.
+2. Sem sessão, confira que a página inicial e links internos mostram somente login, sem menu ou dashboard. Sem configuração do Supabase, o acesso fica indisponível. Depois de configurar e autenticar, o portal deve aparecer; ao sair, a tela deve retornar ao login.
 3. Em Preferências, escolha 200% e reduza o viewport para um celular. Os textos devem quebrar linha sem sobreposição. O menu recolhido não deve receber foco de teclado.
 4. Conecte um ambiente de homologação, configure duas contas e siga os dez passos do README.
 5. Tente aprovar a própria atividade, concluir sem fotografia, enviar uma revisão antiga e acessar uma propriedade não autorizada. Todas essas tentativas devem falhar no servidor, mesmo fora da interface.
