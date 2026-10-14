@@ -11,6 +11,26 @@ let db: PGlite,
   inspection: string,
   cleaning: string;
 let eventId = '00000000-0000-4000-8000-000000000010';
+let sharedUnit: string, firstSharedVersion: string, sharedCycle: string;
+const sharedCup = {
+  id: 'cup',
+  room: 'Cozinha',
+  title: 'Copos',
+  mode: 'count',
+  required: true,
+  evidence_required: false,
+  expected: 4,
+};
+const sharedTowel = {
+  id: 'towel-shared',
+  room: 'Banheiro',
+  title: 'Toalhas',
+  mode: 'count',
+  required: true,
+  evidence_required: false,
+  expected: 1,
+  quantity_per_guest: 1,
+};
 const item = {
   id: 'bed',
   room: 'Quarto',
@@ -25,6 +45,23 @@ async function asUser(id: string) {
   );
 }
 async function rpc(name: string, args: unknown[] = []) {
+  // Os fluxos de teste editam a versão atual; testes de conflito enviam a base explicitamente.
+  if (name === 'configure' && args[0] === 'template') {
+    const payload = JSON.parse(args[1] as string);
+    if (!Object.hasOwn(payload, 'base_template_id')) {
+      const current = await db.query<{ id: string }>(
+        'select id from checklist_template_versions where unit_id=$1 and kind=$2 order by version desc limit 1',
+        [payload.unit_id, payload.kind],
+      );
+      args = [
+        args[0],
+        JSON.stringify({
+          ...payload,
+          base_template_id: current.rows[0]?.id ?? null,
+        }),
+      ];
+    }
+  }
   const marks = args.map((_, i) => `$${i + 1}`).join(',');
   const r = await db.query<Record<string, unknown>>(
     `select public.${name}(${marks}) as value`,
@@ -577,6 +614,369 @@ describe.sequential('operações reais em PostgreSQL com RLS', () => {
         }),
       ]),
     ).rejects.toThrow(/ao menos um administrador/);
+  });
+  it('cria o checkout com os mesmos itens de quantidade e mantém limpeza exclusiva', async () => {
+    await asUser(admin);
+    sharedUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Itens compartilhados',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    firstSharedVersion = (await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: sharedUnit,
+        kind: 'cleaning',
+        items: [
+          sharedCup,
+          sharedTowel,
+          {
+            ...item,
+            id: 'clean-bathroom',
+            title: 'Limpar banheiro',
+            evidence_required: false,
+          },
+        ],
+      }),
+    ])) as string;
+    const templates = await db.query<{ kind: string; items: { id: string }[] }>(
+      'select kind,items from checklist_template_versions where unit_id=$1',
+      [sharedUnit],
+    );
+    expect(templates.rows).toHaveLength(2);
+    expect(
+      templates.rows
+        .find((t) => t.kind === 'inspection')!
+        .items.map((i) => i.id),
+    ).toEqual(['cup', 'towel-shared']);
+    expect(
+      templates.rows.find((t) => t.kind === 'cleaning')!.items.map((i) => i.id),
+    ).toContain('clean-bathroom');
+  });
+  it('usa a ocupação encerrada no checkout e a próxima no check-in', async () => {
+    sharedCycle = (await rpc('confirm_checkout', [
+      JSON.stringify({
+        event_id: '00000000-0000-4000-8000-000000000060',
+        unit_id: sharedUnit,
+        guest_name: 'Teste de ocupações',
+        guests: 4,
+        checkin: '2026-10-12',
+        checkout: '2026-10-14',
+        inspector: worker,
+        cleaner: worker,
+        due_at: '2026-10-15T18:00:00Z',
+      }),
+    ])) as string;
+    const activities = await db.query<{
+      kind: string;
+      occupancy: number;
+      items: { id: string; expected: number }[];
+    }>('select kind,occupancy,items from activities where cycle_id=$1', [
+      sharedCycle,
+    ]);
+    const inspection = activities.rows.find((a) => a.kind === 'inspection')!,
+      cleaning = activities.rows.find((a) => a.kind === 'cleaning')!;
+    expect(inspection.occupancy).toBe(4);
+    expect(cleaning.occupancy).toBe(2);
+    expect(
+      inspection.items.find((i) => i.id === 'towel-shared')!.expected,
+    ).toBe(4);
+    expect(cleaning.items.find((i) => i.id === 'towel-shared')!.expected).toBe(
+      2,
+    );
+  });
+  it('edita nome e quantidade nos dois padrões sem alterar atividades existentes', async () => {
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: sharedUnit,
+        kind: 'cleaning',
+        items: [
+          { ...sharedCup, title: 'Copos de vidro', expected: 6 },
+          sharedTowel,
+          {
+            ...item,
+            id: 'clean-bathroom',
+            title: 'Limpar banheiro',
+            evidence_required: false,
+          },
+        ],
+      }),
+    ]);
+    const current = await db.query<{
+      kind: string;
+      items: { id: string; title: string; expected: number }[];
+    }>(
+      'select distinct on(kind) kind,items from checklist_template_versions where unit_id=$1 order by kind,version desc',
+      [sharedUnit],
+    );
+    for (const template of current.rows)
+      expect(template.items.find((i) => i.id === 'cup')).toMatchObject({
+        title: 'Copos de vidro',
+        expected: 6,
+      });
+    const snapshots = await db.query<{
+      items: { id: string; title: string; expected: number }[];
+    }>('select items from activities where cycle_id=$1', [sharedCycle]);
+    for (const activity of snapshots.rows)
+      expect(activity.items.find((i) => i.id === 'cup')).toMatchObject({
+        title: 'Copos',
+        expected: 4,
+      });
+  });
+  it('reflete alterações e exclusões feitas no checkout sem copiar conferências exclusivas', async () => {
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: sharedUnit,
+        kind: 'inspection',
+        items: [
+          { ...sharedCup, title: 'Copos de vidro', expected: 3 },
+          {
+            id: 'checkout-only',
+            room: 'Geral',
+            title: 'Verificar danos',
+            mode: 'technical',
+            required: true,
+            evidence_required: false,
+          },
+        ],
+      }),
+    ]);
+    const templates = await db.query<{
+      kind: string;
+      items: { id: string; expected: number }[];
+    }>(
+      'select distinct on(kind) kind,items from checklist_template_versions where unit_id=$1 order by kind,version desc',
+      [sharedUnit],
+    );
+    for (const template of templates.rows) {
+      expect(template.items.some((i) => i.id === 'towel-shared')).toBe(false);
+      expect(template.items.find((i) => i.id === 'cup')!.expected).toBe(3);
+    }
+    expect(
+      templates.rows.find((t) => t.kind === 'cleaning')!.items.map((i) => i.id),
+    ).toContain('clean-bathroom');
+    expect(
+      templates.rows.find((t) => t.kind === 'cleaning')!.items.map((i) => i.id),
+    ).not.toContain('checkout-only');
+  });
+  it('rejeita edição de versão antiga e protege o publicador privado', async () => {
+    await expect(
+      rpc('configure', [
+        'template',
+        JSON.stringify({
+          unit_id: sharedUnit,
+          kind: 'cleaning',
+          base_template_id: firstSharedVersion,
+          items: [sharedCup],
+        }),
+      ]),
+    ).rejects.toThrow(/CONFLICT/);
+    await expect(
+      rpc('configure_legacy', [
+        'template',
+        JSON.stringify({
+          unit_id: sharedUnit,
+          kind: 'cleaning',
+          items: [sharedCup],
+        }),
+      ]),
+    ).rejects.toThrow(/permission denied/);
+    await asUser(outsider);
+    await expect(
+      rpc('configure', [
+        'template',
+        JSON.stringify({
+          unit_id: sharedUnit,
+          kind: 'cleaning',
+          items: [sharedCup],
+        }),
+      ]),
+    ).rejects.toThrow(/Acesso negado/);
+    await asUser(admin);
+  });
+  it('recusa quantidades inválidas e itens duplicados sem alterar versões', async () => {
+    const before = await db.query(
+      'select id from checklist_template_versions where unit_id=$1',
+      [sharedUnit],
+    );
+    for (const expected of [-1, 1.5, 10000])
+      await expect(
+        rpc('configure', [
+          'template',
+          JSON.stringify({
+            unit_id: sharedUnit,
+            kind: 'cleaning',
+            items: [{ ...sharedCup, expected }],
+          }),
+        ]),
+      ).rejects.toThrow(/quantidade/);
+    await expect(
+      rpc('configure', [
+        'template',
+        JSON.stringify({
+          unit_id: sharedUnit,
+          kind: 'cleaning',
+          items: [
+            sharedCup,
+            { ...sharedCup, id: 'duplicate', title: ' copos ' },
+          ],
+        }),
+      ]),
+    ).rejects.toThrow(/mesmo nome/);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where unit_id=$1',
+          [sharedUnit],
+        )
+      ).rows,
+    ).toHaveLength(before.rows.length);
+  });
+  it('publica pelo endpoint de edição usado pelo configurador', async () => {
+    const current = await db.query<{ id: string; items: unknown }>(
+      "select id,items from checklist_template_versions where unit_id=$1 and kind='cleaning' order by version desc limit 1",
+      [sharedUnit],
+    );
+    const published = await rpc('save_checklist', [
+      JSON.stringify({
+        unit_id: sharedUnit,
+        kind: 'cleaning',
+        base_template_id: current.rows[0].id,
+        items: current.rows[0].items,
+      }),
+    ]);
+    expect(published).not.toBe(current.rows[0].id);
+    const version = await db.query(
+      'select id from checklist_template_versions where id=$1',
+      [published],
+    );
+    expect(version.rows).toHaveLength(1);
+  });
+  it('reverte toda a edição se o checklist vinculado ficaria vazio', async () => {
+    const u = await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Teste de transação',
+        capacity: 4,
+        base_occupancy: 2,
+      }),
+    ]);
+    const base = await rpc('save_checklist', [
+      JSON.stringify({
+        unit_id: u,
+        kind: 'cleaning',
+        base_template_id: null,
+        items: [sharedCup],
+      }),
+    ]);
+    await expect(
+      rpc('save_checklist', [
+        JSON.stringify({
+          unit_id: u,
+          kind: 'cleaning',
+          base_template_id: base,
+          items: [{ ...item, evidence_required: false }],
+        }),
+      ]),
+    ).rejects.toThrow(/ficaria vazio/);
+    const versions = await db.query<{
+      version: number;
+      items: { id: string }[];
+    }>(
+      'select version,items from checklist_template_versions where unit_id=$1',
+      [u],
+    );
+    expect(versions.rows).toHaveLength(2);
+    expect(
+      versions.rows.every((t) => t.version === 1 && t.items[0].id === 'cup'),
+    ).toBe(true);
+  });
+  it('reconcilia checklists antigos em novas versões com autoria do sistema', async () => {
+    const legacyUnit = await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Unidade legada',
+        capacity: 4,
+        base_occupancy: 2,
+      }),
+    ]);
+    await db.exec('reset role;');
+    await rpc('configure_legacy', [
+      'template',
+      JSON.stringify({
+        unit_id: legacyUnit,
+        kind: 'cleaning',
+        items: [
+          { ...sharedCup, expected: 5 },
+          { ...item, id: 'legacy-cleaning', evidence_required: false },
+        ],
+      }),
+    ]);
+    await rpc('configure_legacy', [
+      'template',
+      JSON.stringify({
+        unit_id: legacyUnit,
+        kind: 'inspection',
+        items: [
+          { ...sharedCup, id: 'old-cup', expected: 2 },
+          {
+            id: 'plate',
+            room: 'Cozinha',
+            title: 'Pratos',
+            mode: 'count',
+            required: true,
+            expected: 4,
+          },
+        ],
+      }),
+    ]);
+    const migration = await readFile(
+      new URL(
+        '../supabase/migrations/202610140005_shared_checklist_items.sql',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const reconciliation = migration.match(/do \$\$[\s\S]*?end \$\$;/)?.[0];
+    expect(reconciliation).toBeTruthy();
+    await db.exec(reconciliation!);
+    const versions = await db.query<{
+      version: number;
+      items: { id: string; expected: number }[];
+      publication_source: string;
+      published_by: string | null;
+    }>(
+      'select version,items,publication_source,published_by from checklist_template_versions where unit_id=$1 order by version',
+      [legacyUnit],
+    );
+    expect(versions.rows).toHaveLength(4);
+    for (const row of versions.rows.filter((t) => t.version === 2)) {
+      expect(row.items.find((i) => i.id === 'cup')!.expected).toBe(5);
+      expect(row.items.some((i) => i.id === 'plate')).toBe(true);
+      expect(row.publication_source).toBe('migration');
+      expect(row.published_by).toBeNull();
+    }
+    const events = await db.query<{
+      actor: string | null;
+      actor_roles: string[];
+    }>(
+      "select actor,actor_roles from audit_events where property_id=$1 and event='checklist.items_reconciled'",
+      [property],
+    );
+    expect(
+      events.rows.every(
+        (e) => e.actor === null && e.actor_roles[0] === 'system',
+      ),
+    ).toBe(true);
+    await asUser(admin);
   });
 });
 type ItemLike = { id: string };

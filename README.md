@@ -28,7 +28,7 @@ npm.cmd run build
 4. Entre na plataforma e use **Criar organização**. A primeira conta recebe os perfis administrativos dessa organização.
 5. Cadastre empreendimentos, unidades, ambientes e inventário. Os nomes do briefing, como Refúgio Casinha Branca e Barra Concept Suites, são cadastrados pela interface; não são imóveis fixos no código.
 6. Crie ou convide as demais contas no Supabase Auth. Em **Equipe e acessos**, atribua suas funções e propriedades autorizadas.
-7. Em **Configurar checklists**, publique os dois tipos para cada unidade. Importe os itens do inventário quando apropriado. Configure fotos obrigatórias, respostas técnicas e faixas de ocupação.
+7. Em **Configurar checklists**, cadastre os itens com nome e quantidade. Esses itens são compartilhados entre os dois tipos da unidade; salvar o primeiro padrão com itens cria o correspondente quando necessário. Cadastre tarefas de limpeza na seção separada, use **Ver prévia** e **Salvar alterações** para editar os padrões. Importe o inventário quando apropriado. Configure fotos obrigatórias, respostas técnicas e faixas de ocupação nas opções de cada item.
 8. Use **Confirmar checkout**, escolhendo responsáveis com funções de vistoriador e limpeza. Contas com funções gerenciais não recebem automaticamente essas duas funções operacionais.
 9. Execute com a conta atribuída, envie as fotos, confirme cada item e envie o progresso. O envio final valida novamente os dados no banco.
 10. Entre com **outra conta gerencial autorizada** para revisar e liberar. O executor, inclusive alguém que executou antes de uma reatribuição, não pode aprovar.
@@ -108,3 +108,5 @@ docs/                   arquitetura, cobertura e pendências
 ```
 
 Veja [arquitetura](docs/ARQUITETURA.md) e [cobertura e pendências](docs/IMPLEMENTACAO.md). Os testes usam PostgreSQL embarcado (PGlite) com esquemas mínimos de Auth/Storage; não substituem homologação do Supabase Auth, Storage HTTP, Realtime, Vercel ou push em dispositivos reais.
+
+Para atualizar um banco já instalado, consulte [Edição, itens compartilhados e prévia](docs/ATUALIZACAO_CHECKLISTS.md). A migração `202610140005_shared_checklist_items.sql` habilita a edição dos padrões e o compartilhamento de itens com quantidade entre check-in e checkout.

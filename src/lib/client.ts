@@ -55,7 +55,14 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
       'Sem conexão. Salve o rascunho neste dispositivo e envie quando estiver online.',
     );
   const { data, error } = await supabase.rpc(name, args);
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (name === 'save_checklist' && error.code === 'PGRST202') {
+      throw new Error(
+        'Atualização do banco pendente. Aplique a migração 202610140005_shared_checklist_items.sql no Supabase antes de salvar os checklists.',
+      );
+    }
+    throw new Error(error.message);
+  }
   return data;
 }
 export type Draft = {

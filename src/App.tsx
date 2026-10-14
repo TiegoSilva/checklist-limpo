@@ -52,6 +52,9 @@ import TemplateEditor from './features/TemplateEditor';
 import ActivityDetail from './features/ActivityDetail';
 import Reports from './features/Reports';
 import LoginPage from './features/LoginPage';
+import ChecklistCatalog from './features/ChecklistCatalog';
+import ChecklistPreviewDialog from './features/ChecklistPreview';
+import InventoryEditor from './features/InventoryEditor';
 
 const navigation = [
   { path: '/', label: 'Visão geral', icon: LayoutDashboard },
@@ -264,8 +267,10 @@ function Portal({ session }: { session: Session }) {
       'Empreendimento'
     );
   };
-  const person = (id: string) =>
-    data.profiles.find((p) => p.id === id)?.name ?? 'Colaborador';
+  const person = (id: string | null) =>
+    id
+      ? (data.profiles.find((p) => p.id === id)?.name ?? 'Colaborador')
+      : 'Sistema';
   const visible = data.activities.filter(
     (a) =>
       (!property ||
@@ -1192,50 +1197,18 @@ function Portal({ session }: { session: Session }) {
             </section>
           )}
           {path === '/checklists' && (
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h2>Configuração de checklists</h2>
-                  <p>Versões publicadas preservam o padrão de cada execução.</p>
-                </div>
-                <Settings2 size={20} />
-              </div>
-              {data.checklist_template_versions.map((t) => (
-                <div key={t.id} className="template-row">
-                  <span className="section-icon">
-                    <ClipboardList size={21} />
-                  </span>
-                  <div>
-                    <strong>
-                      {unitName(t.unit_id)} ·{' '}
-                      {t.kind === 'inspection'
-                        ? 'Vistoria de checkout'
-                        : 'Limpeza e arrumação'}
-                    </strong>
-                    <small>
-                      Versão {t.version} · {t.items.length} tarefas · Publicado
-                    </small>
-                  </div>
-                  <button
-                    className="button secondary"
-                    onClick={() => {
-                      setSelectedUnit(t.id);
-                      setModal('view-template');
-                    }}
-                  >
-                    Ver e criar versão
-                  </button>
-                </div>
-              ))}
-              {!data.checklist_template_versions.length && (
-                <Empty
-                  title="O padrão da sua hospitalidade"
-                  description="Crie os dois checklists: vistoria de checkout e limpeza com conferência de check-in."
-                  action={() => open('template')}
-                  label="Criar checklist"
-                />
-              )}
-            </section>
+            <ChecklistCatalog
+              data={data}
+              onCreate={() => open('template')}
+              onEdit={(id) => {
+                setSelectedUnit(id);
+                setModal('view-template');
+              }}
+              onPreview={(id) => {
+                setSelectedUnit(id);
+                setModal('preview-template');
+              }}
+            />
           )}
           {path === '/equipe' && (
             <section className="panel">
@@ -1699,41 +1672,7 @@ function Portal({ session }: { session: Session }) {
         </Modal>
       )}
       {modal === 'inventory' && (
-        <Modal
-          title="Cadastrar item do inventário"
-          onClose={() => setModal(null)}
-        >
-          <Form
-            fields={[
-              { name: 'unit_id', label: 'Unidade', options: options.units },
-              { name: 'name', label: 'Nome do item' },
-              { name: 'room', label: 'Ambiente' },
-              {
-                name: 'category',
-                label: 'Categoria',
-                options: [
-                  { value: 'permanent', label: 'Patrimônio permanente' },
-                  { value: 'linen', label: 'Enxoval' },
-                  { value: 'consumable', label: 'Material consumível' },
-                ],
-              },
-              {
-                name: 'expected',
-                label: 'Quantidade de referência',
-                type: 'number',
-                min: 0,
-              },
-            ]}
-            onSubmit={async (v) => {
-              if (
-                await run(() =>
-                  rpc('configure', { action: 'inventory', payload: v }),
-                )
-              )
-                setModal(null);
-            }}
-          />
-        </Modal>
+        <InventoryEditor data={data} run={run} onClose={() => setModal(null)} />
       )}
       {modal === 'member' && (
         <MemberEditor data={data} run={run} onClose={() => setModal(null)} />
@@ -1868,6 +1807,19 @@ function Portal({ session }: { session: Session }) {
           />
         </Modal>
       )}
+      {modal === 'preview-template' &&
+        (() => {
+          const template = data.checklist_template_versions.find(
+            (t) => t.id === selectedUnit,
+          );
+          return template ? (
+            <ChecklistPreviewDialog
+              template={template}
+              unit={data.units.find((u) => u.id === template.unit_id)}
+              onClose={() => setModal(null)}
+            />
+          ) : null;
+        })()}
       {(modal === 'template' || modal === 'view-template') && (
         <TemplateEditor
           key={modal + selectedUnit}

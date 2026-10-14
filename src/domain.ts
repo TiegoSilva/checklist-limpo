@@ -122,7 +122,7 @@ export type Notice = {
 export type Audit = {
   id: string;
   property_id: string;
-  actor: string;
+  actor: string | null;
   actor_roles: string[];
   event: string;
   resource_id: string;
@@ -165,6 +165,7 @@ export type Data = {
     kind: string;
     version: number;
     items: Item[];
+    publication_source?: 'user' | 'migration';
   }[];
   environments: { id: string; unit_id: string; name: string }[];
   stays: {
@@ -259,10 +260,16 @@ export function sortActivities(a: Activity[], now = new Date()) {
   );
 }
 export function selectItems(items: Item[], occupancy: number) {
-  return items.filter(
-    (i) =>
-      (i.min_guests ?? 1) <= occupancy && (i.max_guests ?? 999) >= occupancy,
-  );
+  return items
+    .filter(
+      (i) =>
+        (i.min_guests ?? 1) <= occupancy && (i.max_guests ?? 999) >= occupancy,
+    )
+    .map((i) =>
+      i.quantity_per_guest === undefined
+        ? i
+        : { ...i, expected: i.quantity_per_guest * occupancy },
+    );
 }
 export function csv(rows: unknown[][]) {
   return (
