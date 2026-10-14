@@ -132,7 +132,23 @@ export type Audit = {
   after_data: unknown;
   correlation_id: string;
 };
+export type AgendaEntry = {
+  id: string;
+  unit_id: string;
+  guests: number;
+  checkin: string;
+  checkout: string;
+  checkout_time: string;
+  revision: number;
+  inspector: string | null;
+  cleaner: string | null;
+  cycle_id: string | null;
+  inspection_status: string | null;
+  cleaning_status: string | null;
+};
 export type Data = {
+  team_agenda: AgendaEntry[];
+  agenda_ready?: boolean;
   service_evidence: {
     id: string;
     service_id: string;
@@ -177,12 +193,14 @@ export type Data = {
     checkout: string;
   }[];
   preparation_cycles: {
+    reservation_id?: string;
     id: string;
     stay_id: string;
     occupancy_source: string;
   }[];
 };
 export const emptyData: Data = {
+  team_agenda: [],
   service_evidence: [],
   properties: [],
   units: [],

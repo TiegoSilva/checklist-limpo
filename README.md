@@ -110,3 +110,5 @@ docs/                   arquitetura, cobertura e pendências
 Veja [arquitetura](docs/ARQUITETURA.md) e [cobertura e pendências](docs/IMPLEMENTACAO.md). Os testes usam PostgreSQL embarcado (PGlite) com esquemas mínimos de Auth/Storage; não substituem homologação do Supabase Auth, Storage HTTP, Realtime, Vercel ou push em dispositivos reais.
 
 Para atualizar um banco já instalado, consulte [Edição, itens compartilhados e prévia](docs/ATUALIZACAO_CHECKLISTS.md). A migração `202610140005_shared_checklist_items.sql` habilita a edição dos padrões e o compartilhamento de itens com quantidade entre check-in e checkout.
+
+O novo fluxo **Registrar check-in** agenda automaticamente o checkout com vistoria e limpeza. A agenda é compartilhada por propriedade, e o gestor pode editar a saída movendo as mesmas tarefas. Aplique a migração `202610140006_stay_agenda.sql`, conforme [Agenda e checkout automático](docs/AGENDA_CHECKOUT.md).

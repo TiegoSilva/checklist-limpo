@@ -73,7 +73,10 @@ export function ChecklistPreview({
           {applicable
             .filter((i) => i.room === room)
             .map((i) => (
-              <article className="checklist-item" key={i.id}>
+              <article
+                className={`checklist-item ${i.mode === 'count' ? 'count-inline preview-count-inline' : ''}`}
+                key={i.id}
+              >
                 <div className="checklist-item-title">
                   <label className="check-label">
                     <input
@@ -98,7 +101,7 @@ export function ChecklistPreview({
                       Quantidade esperada: <strong>{i.expected ?? 0}</strong>
                     </span>
                     <div className="field">
-                      <span>Quantidade encontrada</span>
+                      <span className="sr-only">Quantidade encontrada</span>
                       <QuantityStepper
                         label={`Quantidade encontrada de ${i.title}`}
                         value={counts[i.id] ?? 0}

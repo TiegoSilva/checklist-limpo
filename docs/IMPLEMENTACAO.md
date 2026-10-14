@@ -52,4 +52,4 @@ Cobertura atual:
 
 ## Próxima etapa externa
 
-Configurar as variáveis de um projeto Supabase de homologação, aplicar as cinco migrações e executar o roteiro de ponta a ponta. Para um banco com as quatro primeiras já aplicadas, execute somente a migração 005, conforme [o guia de atualização](ATUALIZACAO_CHECKLISTS.md). Depois configurar Vercel, domínio, VAPID e agendamento. Nenhuma chave deve ser colocada no repositório ou enviada em mensagens.
+Configurar as variáveis de um projeto Supabase de homologação, aplicar as seis migrações e executar o roteiro de ponta a ponta. Para um banco com as quatro primeiras já aplicadas, execute as migrações 005 e 006, conforme [o guia de checklists](ATUALIZACAO_CHECKLISTS.md) e [o guia da agenda](AGENDA_CHECKOUT.md). Depois configurar Vercel, domínio, VAPID e agendamento. Nenhuma chave deve ser colocada no repositório ou enviada em mensagens.

@@ -45,7 +45,7 @@ import {
   type Activity,
   type Service,
 } from './domain';
-import { Empty, Form, Modal, Badge, type Field } from './components';
+import { Empty, Form, Modal, Badge } from './components';
 import { enablePush, disablePush } from './lib/push';
 import { MemberEditor, ServiceDetail } from './management';
 import TemplateEditor from './features/TemplateEditor';
@@ -55,6 +55,7 @@ import LoginPage from './features/LoginPage';
 import ChecklistCatalog from './features/ChecklistCatalog';
 import ChecklistPreviewDialog from './features/ChecklistPreview';
 import InventoryEditor from './features/InventoryEditor';
+import StayAgenda, { CheckinForm } from './features/StayAgenda';
 
 const navigation = [
   { path: '/', label: 'Visão geral', icon: LayoutDashboard },
@@ -210,6 +211,11 @@ function Portal({ session }: { session: Session }) {
         { event: '*', schema: 'public', table: 'service_orders' },
         () => qc.invalidateQueries({ queryKey: ['operation'] }),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'agenda_changes' },
+        () => qc.invalidateQueries({ queryKey: ['operation'] }),
+      )
       .subscribe();
     return () => {
       void supabase?.removeChannel(channel);
@@ -344,7 +350,7 @@ function Portal({ session }: { session: Session }) {
             ? 'Adicionar colaborador'
             : path === '/checklists'
               ? 'Novo checklist'
-              : 'Confirmar checkout';
+              : 'Registrar check-in';
   const actionModal =
     path === '/propriedades'
       ? 'property'
@@ -356,7 +362,7 @@ function Portal({ session }: { session: Session }) {
             ? 'member'
             : path === '/checklists'
               ? 'template'
-              : 'checkout';
+              : 'checkin';
   const activityCard = (a: Activity) => (
     <article key={a.id} className="activity-card">
       <div
@@ -805,8 +811,8 @@ function Portal({ session }: { session: Session }) {
                     ) : (
                       <Empty
                         title="Um novo dia começa com organização"
-                        description="Confirme um checkout para criar a vistoria e a preparação da unidade."
-                        action={() => open('checkout')}
+                        description="Registre um check-in para programar a saída, a vistoria e a limpeza."
+                        action={() => open('checkin')}
                         label="Programar atividades"
                       />
                     )}
@@ -915,6 +921,14 @@ function Portal({ session }: { session: Session }) {
                 </aside>
               </div>
             </>
+          )}
+          {['/', '/atividades', '/meu-dia'].includes(path) && (
+            <StayAgenda
+              data={data}
+              manager={manager}
+              property={property}
+              run={run}
+            />
           )}
           {['/atividades', '/meu-dia'].includes(path) && (
             <section className="panel">
@@ -1459,59 +1473,13 @@ function Portal({ session }: { session: Session }) {
                 </div>
                 <button
                   className="button secondary"
-                  onClick={() => open('reservation')}
+                  onClick={() => open('checkin')}
                 >
                   <Plus size={16} />
                   Confirmar reserva
                 </button>
               </div>
             </section>
-          )}
-          {modal === 'reservation' && (
-            <Modal
-              title="Confirmar nova reserva"
-              onClose={() => setModal(null)}
-              wide
-            >
-              <CheckoutForm
-                fields={[
-                  { name: 'unit_id', label: 'Unidade', options: options.units },
-                  { name: 'guest_name', label: 'Responsável pela reserva' },
-                  {
-                    name: 'guests',
-                    label: 'Quantidade de hóspedes',
-                    type: 'number',
-                    min: 1,
-                  },
-                  { name: 'checkin', label: 'Data de chegada', type: 'date' },
-                  { name: 'checkout', label: 'Data de saída', type: 'date' },
-                  {
-                    name: 'assignee',
-                    label: 'Responsável por eventuais ajustes',
-                    options: options.people,
-                  },
-                  {
-                    name: 'due_at',
-                    label: 'Prazo de adequação',
-                    type: 'datetime-local',
-                    value: dueDefault(),
-                  },
-                ]}
-                onSubmit={(v) =>
-                  run(
-                    () =>
-                      rpc('confirm_reservation', {
-                        payload: {
-                          ...v,
-                          due_at: new Date(v.due_at).toISOString(),
-                        },
-                      }),
-                    'Reserva registrada. Ajustes aplicáveis foram programados.',
-                  )
-                }
-                onClose={() => setModal(null)}
-              />
-            </Modal>
           )}
           <footer className="page-footer">
             <span>
@@ -1677,70 +1645,8 @@ function Portal({ session }: { session: Session }) {
       {modal === 'member' && (
         <MemberEditor data={data} run={run} onClose={() => setModal(null)} />
       )}
-      {modal === 'checkout' && (
-        <Modal title="Confirmar checkout" onClose={() => setModal(null)} wide>
-          <p className="modal-description">
-            Cria a vistoria e a limpeza no mesmo ciclo. Publique os dois
-            checklists da unidade antes de continuar.
-          </p>
-          <CheckoutForm
-            fields={[
-              { name: 'unit_id', label: 'Unidade', options: options.units },
-              { name: 'guest_name', label: 'Hóspede da estadia encerrada' },
-              {
-                name: 'guests',
-                label: 'Quantidade de hóspedes da estadia encerrada',
-                type: 'number',
-                min: 1,
-              },
-              { name: 'checkin', label: 'Data de check-in', type: 'date' },
-              {
-                name: 'checkout',
-                label: 'Data de checkout',
-                type: 'date',
-                value: today(),
-              },
-              {
-                name: 'occupancy',
-                label: 'Ocupação de preparação (opcional)',
-                type: 'number',
-                required: false,
-                min: 1,
-                hint: 'Sem preenchimento: usa o padrão-base da unidade, mesmo sem próxima reserva.',
-              },
-              {
-                name: 'reason',
-                label: 'Justificativa da ocupação excepcional',
-                required: false,
-              },
-              {
-                name: 'inspector',
-                label: 'Responsável pela vistoria',
-                options: options.people,
-              },
-              {
-                name: 'cleaner',
-                label: 'Responsável pela limpeza',
-                options: options.people,
-              },
-              {
-                name: 'due_at',
-                label: 'Prazo previsto',
-                type: 'datetime-local',
-                value: dueDefault(),
-              },
-            ]}
-            onSubmit={async (v) => {
-              const payload = {
-                ...v,
-                due_at: new Date(v.due_at).toISOString(),
-                occupancy: v.occupancy || null,
-              };
-              return run(() => rpc('confirm_checkout', { payload }));
-            }}
-            onClose={() => setModal(null)}
-          />
-        </Modal>
+      {modal === 'checkin' && (
+        <CheckinForm data={data} run={run} onClose={() => setModal(null)} />
       )}
       {modal === 'service' && (
         <Modal title="Nova ordem de serviço" onClose={() => setModal(null)}>
@@ -1932,25 +1838,5 @@ function Setup() {
         pendências de produção.
       </p>
     </div>
-  );
-}
-function CheckoutForm({
-  fields,
-  onSubmit,
-  onClose,
-}: {
-  fields: Field[];
-  onSubmit: (v: Record<string, string>) => Promise<boolean>;
-  onClose: () => void;
-}) {
-  const [id] = useState(() => crypto.randomUUID());
-  return (
-    <Form
-      fields={fields}
-      submit="Confirmar e criar atividades"
-      onSubmit={async (v) => {
-        if (await onSubmit({ ...v, event_id: id })) onClose();
-      }}
-    />
   );
 }

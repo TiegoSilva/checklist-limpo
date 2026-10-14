@@ -2,7 +2,7 @@
 
 ## Ativar em um Supabase existente
 
-Depois de ter aplicado as migrações 001 a 004, execute **somente** `supabase/migrations/202610140005_shared_checklist_items.sql` no SQL Editor, uma vez. Não reaplique as anteriores. Em um projeto novo, aplique todas as cinco, na ordem dos nomes.
+Depois de ter aplicado as migrações 001 a 004, execute **somente** `supabase/migrations/202610140005_shared_checklist_items.sql` no SQL Editor, uma vez. Não reaplique as anteriores. Em um projeto novo, aplique todas as migrações, na ordem dos nomes. A agenda e o checkout automático também exigem a migração 006: veja [o guia da agenda](AGENDA_CHECKOUT.md).
 
 Esta atualização cria a publicação transacional com controle de concorrência, vincula os itens com quantidade e reconcilia os padrões já cadastrados em novas versões. A autoria dessas versões automáticas aparece como **Sistema** na auditoria. Em caso de nomes iguais no mesmo ambiente, o padrão de check-in prevalece; itens exclusivos do checkout são preservados e passam a ser compartilhados. Tarefas simples e conferências técnicas continuam exclusivas de cada tipo.
 
@@ -12,7 +12,7 @@ As versões antigas, atividades já criadas, evidências e respostas não são a
 
 1. Entre com uma conta administrativa ou gerencial autorizada e abra **Configurar checklists**.
 2. Use **Editar checklist** no padrão desejado. A lista principal mostra a última versão de cada tipo por unidade.
-3. Em **Itens e quantidades**, informe o nome e ajuste o valor pelos botões `−` e `+`. O campo também aceita digitação. O ambiente padrão é Geral; ambiente, fotos, ocupação e outras regras ficam em **Ambiente e opções**.
+3. Em **Itens e quantidades**, informe o nome e ajuste o valor pelos botões `−` e `+`. O campo também aceita digitação. O ambiente padrão é Geral; ambiente, fotos, ocupação e outras regras ficam em **Opções**.
 4. Cadastre tarefas de limpeza na seção separada. Elas não são copiadas para a vistoria de checkout.
 5. Use **Ver prévia** para experimentar o checklist antes de salvar. Escolha a ocupação para conferir as quantidades e tarefas aplicáveis. Marcar itens ou alterar respostas nessa prévia não grava nada.
 6. Clique em **Salvar alterações**. O banco cria uma nova versão do padrão editado e, quando necessário, outra do checklist vinculado, na mesma transação. Nome, quantidade, faixa de ocupação e demais opções dos itens com quantidade permanecem alinhados.

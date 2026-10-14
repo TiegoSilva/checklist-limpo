@@ -19,17 +19,27 @@ export async function loadData(): Promise<Data> {
     throw new Error('Sem conexão e sem atividades salvas neste dispositivo.');
   }
   const tables = Object.keys(emptyData) as (keyof Data)[];
+  let agendaReady = true;
   const result = await Promise.all(
     tables.map(async (table) => {
       const { data, error } = await supabase!
         .from(table)
         .select('*')
         .limit(1000);
+      if (
+        error &&
+        table === 'team_agenda' &&
+        ['PGRST205', '42P01'].includes(error.code)
+      ) {
+        agendaReady = false;
+        return [table, []] as const;
+      }
       if (error) throw new Error(`${table}: ${error.message}`);
       return [table, data] as const;
     }),
   );
   const data = Object.fromEntries(result) as Data;
+  data.agenda_ready = agendaReady;
   // Cache mínimo por usuário. Dados de hóspedes, notificações e auditoria não são persistidos.
   const local = {
     ...emptyData,
@@ -38,6 +48,8 @@ export async function loadData(): Promise<Data> {
     organizations: data.organizations,
     units: data.units,
     properties: data.properties,
+    team_agenda: data.team_agenda,
+    agenda_ready: agendaReady,
     activities: data.activities.filter(
       (a) =>
         a.assignee === session.user.id &&
@@ -56,6 +68,14 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (
+      ['register_checkin', 'reschedule_checkout'].includes(name) &&
+      error.code === 'PGRST202'
+    ) {
+      throw new Error(
+        'Aplique a migração 202610140006_stay_agenda.sql no Supabase para ativar a agenda e o checkout automático.',
+      );
+    }
     if (name === 'save_checklist' && error.code === 'PGRST202') {
       throw new Error(
         'Atualização do banco pendente. Aplique a migração 202610140005_shared_checklist_items.sql no Supabase antes de salvar os checklists.',

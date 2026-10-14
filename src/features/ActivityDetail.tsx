@@ -142,7 +142,7 @@ export default function ActivityDetail({
           </p>
           {stay && (
             <p>
-              Estadia encerrada: {stay.guest_name} · {stay.guests} hóspedes ·{' '}
+              Hospedagem: {stay.guest_name} · {stay.guests} hóspedes ·{' '}
               {stay.checkin} a {stay.checkout}
             </p>
           )}
@@ -216,8 +216,12 @@ export default function ActivityDetail({
             .filter((i) => i.room === room)
             .map((i) => {
               const r = responses[i.id] ?? { confirmed: false };
+              const Extras = i.mode === 'count' ? 'details' : 'div';
               return (
-                <div className="checklist-item" key={i.id}>
+                <div
+                  className={`checklist-item ${i.mode === 'count' ? 'count-inline' : ''}`}
+                  key={i.id}
+                >
                   <div className="checklist-item-title">
                     <label className="check-label">
                       <input
@@ -234,28 +238,9 @@ export default function ActivityDetail({
                       <span className="required">Obrigatório</span>
                     )}
                   </div>
-                  {i.instructions && <p className="muted">{i.instructions}</p>}
-                  {i.mode === 'technical' && (
-                    <label className="field">
-                      <span>Conferência técnica</span>
-                      <select
-                        disabled={!editable}
-                        value={r.answer ?? ''}
-                        onChange={(e) =>
-                          update(i.id, { answer: e.target.value })
-                        }
-                      >
-                        <option value="">Selecione uma resposta</option>
-                        <option value="ok">Conforme</option>
-                        <option value="issue">Não conforme</option>
-                        {i.allow_na && (
-                          <option value="na">Não se aplica</option>
-                        )}
-                      </select>
-                    </label>
-                  )}
                   {i.mode === 'count' && (
                     <>
+                      {' '}
                       <div className="counter-row">
                         <span>
                           Esperado: <strong>{i.expected}</strong>
@@ -323,130 +308,164 @@ export default function ActivityDetail({
                           ))}
                         </select>
                       </label>
-                      <details>
-                        <summary>Movimentação de enxoval e reposição</summary>
-                        <div className="two-cols">
-                          {[
-                            {
-                              key: 'laundry',
-                              label: 'Recolhido para lavanderia',
-                            },
-                            { key: 'damaged', label: 'Danificado' },
-                            { key: 'missing', label: 'Não localizado' },
-                            { key: 'replenished', label: 'Reposto' },
-                          ].map((f) => (
-                            <label className="field" key={f.key}>
-                              <span>{f.label}</span>
-                              <input
-                                type="number"
-                                min={0}
-                                disabled={!editable}
-                                value={
-                                  (r[f.key as keyof Response] as number) ?? ''
-                                }
-                                onChange={(e) =>
-                                  update(i.id, {
-                                    [f.key]: Number(e.target.value),
-                                  })
-                                }
-                              />
-                            </label>
-                          ))}
-                        </div>
-                        <small>
-                          Itens recolhidos para lavanderia não são tratados como
-                          desaparecidos.
-                        </small>
-                      </details>
                     </>
                   )}
-                  <label className="field">
-                    <span>
-                      Observação{' '}
-                      {r.answer === 'issue' ||
-                      (r.found !== undefined && r.found !== i.expected)
-                        ? '(obrigatória para divergências)'
-                        : '(opcional)'}
-                    </span>
-                    <textarea
-                      disabled={!editable}
-                      value={r.note ?? ''}
-                      onChange={(e) => update(i.id, { note: e.target.value })}
-                    />
-                  </label>
-                  <div className="button-row">
-                    {i.reference_path && (
-                      <button
-                        className="button secondary"
-                        onClick={() =>
-                          void run(
-                            async () =>
-                              setImage({
-                                url: await signedImage(
-                                  'references',
-                                  i.reference_path!,
-                                ),
-                                label: `Referência · ${i.title}`,
-                              }),
-                            'Foto de referência aberta.',
-                          )
-                        }
-                      >
-                        <Image size={16} />
-                        Ver referência
-                      </button>
+                  <Extras className="item-extras">
+                    {i.mode === 'count' && (
+                      <summary>
+                        Fotos, observações e reposição
+                        {i.evidence_required ? ' · Foto obrigatória' : ''}
+                      </summary>
                     )}
-                    {editable && (
-                      <label className="button secondary file-button">
-                        <Camera size={16} />
-                        {i.evidence_required
-                          ? 'Anexar foto obrigatória'
-                          : 'Anexar foto'}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          capture="environment"
-                          disabled={busy}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file)
-                              await run(
-                                () => uploadEvidence(a.id, i.id, file),
-                                'Foto recebida pelo servidor.',
-                              );
-                            e.target.value = '';
-                          }}
-                        />
+                    {i.instructions && (
+                      <p className="muted">{i.instructions}</p>
+                    )}
+                    {i.mode === 'technical' && (
+                      <label className="field">
+                        <span>Conferência técnica</span>
+                        <select
+                          disabled={!editable}
+                          value={r.answer ?? ''}
+                          onChange={(e) =>
+                            update(i.id, { answer: e.target.value })
+                          }
+                        >
+                          <option value="">Selecione uma resposta</option>
+                          <option value="ok">Conforme</option>
+                          <option value="issue">Não conforme</option>
+                          {i.allow_na && (
+                            <option value="na">Não se aplica</option>
+                          )}
+                        </select>
                       </label>
                     )}
-                    {evidence
-                      .filter((e) => e.item_id === i.id)
-                      .map((e, index) => (
+                    {i.mode === 'count' && (
+                      <>
+                        <details>
+                          <summary>Movimentação de enxoval e reposição</summary>
+                          <div className="two-cols">
+                            {[
+                              {
+                                key: 'laundry',
+                                label: 'Recolhido para lavanderia',
+                              },
+                              { key: 'damaged', label: 'Danificado' },
+                              { key: 'missing', label: 'Não localizado' },
+                              { key: 'replenished', label: 'Reposto' },
+                            ].map((f) => (
+                              <label className="field" key={f.key}>
+                                <span>{f.label}</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  disabled={!editable}
+                                  value={
+                                    (r[f.key as keyof Response] as number) ?? ''
+                                  }
+                                  onChange={(e) =>
+                                    update(i.id, {
+                                      [f.key]: Number(e.target.value),
+                                    })
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </div>
+                          <small>
+                            Itens recolhidos para lavanderia não são tratados
+                            como desaparecidos.
+                          </small>
+                        </details>
+                      </>
+                    )}
+                    <label className="field">
+                      <span>
+                        Observação{' '}
+                        {r.answer === 'issue' ||
+                        (r.found !== undefined && r.found !== i.expected)
+                          ? '(obrigatória para divergências)'
+                          : '(opcional)'}
+                      </span>
+                      <textarea
+                        disabled={!editable}
+                        value={r.note ?? ''}
+                        onChange={(e) => update(i.id, { note: e.target.value })}
+                      />
+                    </label>
+                    <div className="button-row">
+                      {i.reference_path && (
                         <button
                           className="button secondary"
-                          key={e.id}
                           onClick={() =>
                             void run(
                               async () =>
                                 setImage({
-                                  url: await signedImage('evidence', e.path),
-                                  label: `Execução · ${i.title} · ${dateTime(e.received_at)}`,
+                                  url: await signedImage(
+                                    'references',
+                                    i.reference_path!,
+                                  ),
+                                  label: `Referência · ${i.title}`,
                                 }),
-                              'Foto de execução aberta.',
+                              'Foto de referência aberta.',
                             )
                           }
                         >
-                          <Image size={15} />
-                          Foto {index + 1}
+                          <Image size={16} />
+                          Ver referência
                         </button>
-                      ))}
-                  </div>
-                  {i.evidence_required &&
-                    !evidence.some((e) => e.item_id === i.id) && (
-                      <small className="muted">
-                        Fotografia pendente. A conclusão ficará bloqueada.
-                      </small>
-                    )}
+                      )}
+                      {editable && (
+                        <label className="button secondary file-button">
+                          <Camera size={16} />
+                          {i.evidence_required
+                            ? 'Anexar foto obrigatória'
+                            : 'Anexar foto'}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            capture="environment"
+                            disabled={busy}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file)
+                                await run(
+                                  () => uploadEvidence(a.id, i.id, file),
+                                  'Foto recebida pelo servidor.',
+                                );
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                      )}
+                      {evidence
+                        .filter((e) => e.item_id === i.id)
+                        .map((e, index) => (
+                          <button
+                            className="button secondary"
+                            key={e.id}
+                            onClick={() =>
+                              void run(
+                                async () =>
+                                  setImage({
+                                    url: await signedImage('evidence', e.path),
+                                    label: `Execução · ${i.title} · ${dateTime(e.received_at)}`,
+                                  }),
+                                'Foto de execução aberta.',
+                              )
+                            }
+                          >
+                            <Image size={15} />
+                            Foto {index + 1}
+                          </button>
+                        ))}
+                    </div>
+                    {i.evidence_required &&
+                      !evidence.some((e) => e.item_id === i.id) && (
+                        <small className="muted">
+                          Fotografia pendente. A conclusão ficará bloqueada.
+                        </small>
+                      )}
+                  </Extras>
                 </div>
               );
             })}
@@ -640,7 +659,13 @@ export default function ActivityDetail({
           )}
         </div>
       )}
-      {manager && !isDone(a) && (
+      {manager && !isDone(a) && cycle?.reservation_id && (
+        <p className="info-card">
+          Para mudar a data do checkout, use Editar saída na Agenda da equipe. A
+          vistoria e a limpeza serão movidas juntas.
+        </p>
+      )}
+      {manager && !isDone(a) && !cycle?.reservation_id && (
         <details className="room-section" open={schedule}>
           <summary
             onClick={(e) => {

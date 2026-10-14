@@ -157,7 +157,7 @@ export default function TemplateEditor({
   };
   const options = (i: Item) => (
     <details className="item-options">
-      <summary>Ambiente e opções</summary>
+      <summary>Opções</summary>
       <div className="item-options-body">
         <label className="field">
           <span>Ambiente</span>
@@ -425,49 +425,42 @@ export default function TemplateEditor({
               </button>
             </div>
             {counts.map((i, index) => (
-              <fieldset className="simple-item" key={i.id}>
-                <legend>Item {index + 1}</legend>
-                <div className="simple-item-main">
-                  <label className="field">
-                    <span>Nome do item</span>
-                    <input
-                      value={i.title}
-                      placeholder="Ex.: toalha de banho"
-                      onChange={(e) => update(i.id, { title: e.target.value })}
-                    />
-                  </label>
-                  <div className="field">
-                    <span>
-                      {i.quantity_per_guest === undefined
-                        ? 'Quantidade padrão'
-                        : 'Quantidade por hóspede'}
-                    </span>
-                    <QuantityStepper
-                      label={`Quantidade de ${i.title || `item ${index + 1}`}`}
-                      value={i.quantity_per_guest ?? i.expected ?? 0}
-                      onChange={(n) =>
-                        update(
-                          i.id,
-                          i.quantity_per_guest === undefined
-                            ? { expected: n }
-                            : { quantity_per_guest: n },
-                        )
-                      }
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="icon-button danger-text"
-                    aria-label={`Remover ${i.title || `item ${index + 1}`}`}
-                    onClick={() =>
-                      setItems((prev) => prev.filter((x) => x.id !== i.id))
+              <div className="compact-item" key={i.id}>
+                <input
+                  aria-label={`Nome do item ${index + 1}`}
+                  value={i.title}
+                  placeholder="Nome do item"
+                  onChange={(e) => update(i.id, { title: e.target.value })}
+                />
+                <div className="compact-quantity">
+                  <QuantityStepper
+                    label={`Quantidade de ${i.title || `item ${index + 1}`}`}
+                    value={i.quantity_per_guest ?? i.expected ?? 0}
+                    onChange={(n) =>
+                      update(
+                        i.id,
+                        i.quantity_per_guest === undefined
+                          ? { expected: n }
+                          : { quantity_per_guest: n },
+                      )
                     }
-                  >
-                    <Trash2 size={18} />
-                  </button>
+                  />
+                  {i.quantity_per_guest !== undefined && (
+                    <small>/hóspede</small>
+                  )}
                 </div>
+                <button
+                  type="button"
+                  className="icon-button danger-text"
+                  aria-label={`Remover ${i.title || `item ${index + 1}`}`}
+                  onClick={() =>
+                    setItems((prev) => prev.filter((x) => x.id !== i.id))
+                  }
+                >
+                  <Trash2 size={18} />
+                </button>
                 {options(i)}
-              </fieldset>
+              </div>
             ))}
             {!counts.length && (
               <p className="editor-empty">

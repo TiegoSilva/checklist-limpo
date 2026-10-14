@@ -980,3 +980,287 @@ describe.sequential('operações reais em PostgreSQL com RLS', () => {
   });
 });
 type ItemLike = { id: string };
+
+describe.sequential('check-in e agenda compartilhada', () => {
+  let agendaUnit: string;
+  const booking = '00000000-0000-4000-8000-000000000081';
+  const payload = () => ({
+    event_id: booking,
+    unit_id: agendaUnit,
+    guest_name: 'Nome privado',
+    guests: 3,
+    checkin: '2099-01-01',
+    checkout: '2099-01-05',
+    inspector: worker,
+    cleaner: worker,
+  });
+  it('registra check-in com duas tarefas futuras, sem duplicar ou alterar o estado da unidade', async () => {
+    await asUser(admin);
+    agendaUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Unidade agenda',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: agendaUnit,
+        kind: 'cleaning',
+        items: [sharedTowel],
+      }),
+    ]);
+    expect(await rpc('register_checkin', [JSON.stringify(payload())])).toBe(
+      booking,
+    );
+    expect(await rpc('register_checkin', [JSON.stringify(payload())])).toBe(
+      booking,
+    );
+    const rows = await db.query<{
+      id: string;
+      kind: string;
+      occupancy: number;
+      items: any[];
+      due_at: Date;
+    }>('select * from activities where unit_id=$1 order by kind', [agendaUnit]);
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.map((a) => a.occupancy)).toEqual([2, 3]);
+    expect(rows.rows[1].items[0].expected).toBe(3);
+    expect(new Date(rows.rows[0].due_at).toISOString()).toBe(
+      '2099-01-05T15:00:00.000Z',
+    );
+    expect(
+      (
+        await db.query<{ operational_status: string }>(
+          'select operational_status from units where id=$1',
+          [agendaUnit],
+        )
+      ).rows[0].operational_status,
+    ).toBe('unavailable');
+  });
+  it('compartilha a agenda com colaboradores sem expor nome de hóspedes ou outras propriedades', async () => {
+    await asUser(admin);
+    await rpc('configure', [
+      'member',
+      JSON.stringify({
+        org_id: org,
+        email: 'outsider@aja.test',
+        name: 'Equipe agenda',
+        roles: ['cleaner'],
+        properties: [property],
+      }),
+    ]);
+    await asUser(outsider);
+    const agenda = await db.query<Record<string, unknown>>(
+      'select * from team_agenda where id=$1',
+      [booking],
+    );
+    expect(agenda.rows).toHaveLength(1);
+    expect(agenda.rows[0]).not.toHaveProperty('guest_name');
+    expect(
+      (
+        await db.query('select * from activities where unit_id=$1', [
+          agendaUnit,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query('select * from notifications where title=$1', [
+          'Check-in e checkout programados',
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    await expect(
+      rpc('reschedule_checkout', [
+        booking,
+        0,
+        JSON.stringify({
+          checkout: '2099-01-07',
+          reason: 'Estadia prorrogada',
+        }),
+      ]),
+    ).rejects.toThrow(/Acesso negado/);
+    await asUser(admin);
+    await rpc('configure', [
+      'member',
+      JSON.stringify({
+        org_id: org,
+        email: 'outsider@aja.test',
+        name: 'Sem acesso',
+        roles: ['cleaner'],
+        properties: [],
+      }),
+    ]);
+    await asUser(outsider);
+    expect(
+      (await db.query('select * from team_agenda where id=$1', [booking])).rows,
+    ).toHaveLength(0);
+  });
+  it('prorroga e antecipa a saída movendo as mesmas tarefas e notificando a equipe', async () => {
+    await asUser(admin);
+    const before = (
+      await db.query<{ id: string }>(
+        'select id from activities where unit_id=$1 order by id',
+        [agendaUnit],
+      )
+    ).rows;
+    await rpc('reschedule_checkout', [
+      booking,
+      0,
+      JSON.stringify({
+        checkout: '2099-01-07',
+        checkout_time: '11:00',
+        reason: 'Hóspede estendeu a estadia',
+      }),
+    ]);
+    await rpc('reschedule_checkout', [
+      booking,
+      1,
+      JSON.stringify({
+        checkout: '2099-01-04',
+        checkout_time: '10:00',
+        reason: 'Hóspede antecipou a saída',
+      }),
+    ]);
+    const after = (
+      await db.query<{ id: string; due_at: Date; revision: number }>(
+        'select id,due_at,revision from activities where unit_id=$1 order by id',
+        [agendaUnit],
+      )
+    ).rows;
+    expect(after.map((a) => a.id)).toEqual(before.map((a) => a.id));
+    expect(
+      after.every(
+        (a) =>
+          new Date(a.due_at).toISOString() === '2099-01-04T13:00:00.000Z' &&
+          a.revision === 2,
+      ),
+    ).toBe(true);
+    expect(
+      (
+        await db.query<{ checkout: Date }>(
+          'select checkout from stays where id=$1',
+          [booking],
+        )
+      ).rows[0].checkout,
+    ).toBeTruthy();
+    expect(
+      (
+        await db.query(
+          'select * from audit_events where resource_id=$1 and event=$2',
+          [booking, 'checkout.rescheduled'],
+        )
+      ).rows,
+    ).toHaveLength(2);
+    await asUser(worker);
+    expect(
+      (
+        await db.query('select * from notifications where title=$1', [
+          'Data do checkout alterada',
+        ])
+      ).rows,
+    ).toHaveLength(2);
+  });
+  it('bloqueia conflitos de versão, datas inválidas, sobreposição e execução futura', async () => {
+    await asUser(admin);
+    await expect(
+      rpc('reschedule_checkout', [
+        booking,
+        0,
+        JSON.stringify({ checkout: '2099-01-08', reason: 'Versão antiga' }),
+      ]),
+    ).rejects.toThrow(/alterada/);
+    await expect(
+      rpc('reschedule_checkout', [
+        booking,
+        2,
+        JSON.stringify({ checkout: '2098-12-31', reason: 'Data inválida' }),
+      ]),
+    ).rejects.toThrow(/saída válida/);
+    await expect(
+      rpc('reschedule_checkout', [
+        booking,
+        2,
+        JSON.stringify({ checkout: '2099-01-08', reason: 'x' }),
+      ]),
+    ).rejects.toThrow(/justifique/);
+    await expect(
+      rpc('register_checkin', [
+        JSON.stringify({
+          ...payload(),
+          event_id: '00000000-0000-4000-8000-000000000082',
+          checkin: '2099-01-02',
+        }),
+      ]),
+    ).rejects.toThrow(/outra hospedagem/);
+    const a = (
+      await db.query<{ id: string }>(
+        'select id from activities where unit_id=$1 limit 1',
+        [agendaUnit],
+      )
+    ).rows[0].id;
+    await asUser(worker);
+    await expect(action(a, 'start')).rejects.toThrow(/futura/);
+    await expect(
+      action(a, 'schedule', {
+        reason: 'Alterar sozinha',
+        assignee: worker,
+        due_at: '2099-02-01',
+        priority: 'normal',
+      }),
+    ).rejects.toThrow(/agenda da equipe/);
+  });
+  it('adapta a limpeza pendente à próxima entrada e impede estender sobre ela', async () => {
+    await asUser(admin);
+    await rpc('register_checkin', [
+      JSON.stringify({
+        ...payload(),
+        event_id: '00000000-0000-4000-8000-000000000083',
+        guests: 5,
+        checkin: '2099-01-06',
+        checkout: '2099-01-10',
+      }),
+    ]);
+    const cleaning = (
+      await db.query<{ occupancy: number; items: any[] }>(
+        'select a.* from activities a join preparation_cycles c on c.id=a.cycle_id where c.reservation_id=$1 and a.kind=$2',
+        [booking, 'cleaning'],
+      )
+    ).rows[0];
+    expect(cleaning.occupancy).toBe(5);
+    expect(cleaning.items[0].expected).toBe(5);
+    await expect(
+      rpc('reschedule_checkout', [
+        booking,
+        2,
+        JSON.stringify({
+          checkout: '2099-01-07',
+          reason: 'Prorrogação conflitante',
+        }),
+      ]),
+    ).rejects.toThrow(/conflita/);
+  });
+  it('preserva execuções iniciadas ao tentar mudar a saída', async () => {
+    await asUser(admin);
+    await db.exec('reset role;');
+    await db.query(
+      "update activities set status='in_progress',started_at=now() where cycle_id=(select id from preparation_cycles where reservation_id=$1) and kind='inspection'",
+      [booking],
+    );
+    await asUser(admin);
+    await expect(
+      rpc('reschedule_checkout', [
+        booking,
+        2,
+        JSON.stringify({
+          checkout: '2099-01-05',
+          reason: 'Execução já iniciada',
+        }),
+      ]),
+    ).rejects.toThrow(/já foi iniciada/);
+  });
+});
