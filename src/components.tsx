@@ -1,0 +1,168 @@
+import { statusLabels } from './domain';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ArrowRight, Check, Inbox, LoaderCircle, X } from 'lucide-react';
+export function Modal({
+  title,
+  children,
+  onClose,
+  wide = false,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    el?.showModal();
+    return () => el?.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={wide ? 'modal wide' : 'modal'}
+      onCancel={onClose}
+    >
+      <header className="modal-head">
+        <h2>{title}</h2>
+        <button className="icon-button" aria-label="Fechar" onClick={onClose}>
+          <X size={21} />
+        </button>
+      </header>
+      {children}
+    </dialog>
+  );
+}
+export function Empty({
+  title,
+  description,
+  action,
+  label,
+}: {
+  title: string;
+  description: string;
+  action?: () => void;
+  label?: string;
+}) {
+  return (
+    <div className="empty">
+      <div className="empty-icon">
+        <Inbox size={25} />
+      </div>
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {action && (
+        <button className="button secondary" onClick={action}>
+          {label}
+          <ArrowRight size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+export type Field = {
+  name: string;
+  label: string;
+  type?: string;
+  options?: { value: string; label: string }[];
+  value?: string;
+  required?: boolean;
+  hint?: string;
+  min?: number;
+};
+export function Form({
+  fields,
+  onSubmit,
+  submit = 'Salvar',
+  busy = false,
+  children,
+}: {
+  fields: Field[];
+  onSubmit: (values: Record<string, string>) => Promise<unknown>;
+  submit?: string;
+  busy?: boolean;
+  children?: ReactNode;
+}) {
+  const shape = Object.fromEntries(
+    fields.map((f) => [
+      f.name,
+      f.required === false
+        ? z.string()
+        : z.string().min(1, 'Preencha este campo.'),
+    ]),
+  );
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<Record<string, string>>({
+    resolver: zodResolver(z.object(shape)),
+    defaultValues: Object.fromEntries(
+      fields.map((f) => [f.name, f.value ?? '']),
+    ),
+  });
+  return (
+    <form className="form" onSubmit={handleSubmit(onSubmit)}>
+      {fields.map((f) => (
+        <label key={f.name} className="field">
+          <span>{f.label}</span>
+          {f.options ? (
+            <select {...register(f.name)} required={f.required !== false}>
+              <option value="">Selecione</option>
+              {f.options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          ) : f.type === 'textarea' ? (
+            <textarea
+              {...register(f.name)}
+              rows={3}
+              required={f.required !== false}
+            />
+          ) : (
+            <input
+              {...register(f.name)}
+              type={f.type ?? 'text'}
+              min={f.min}
+              required={f.required !== false}
+            />
+          )}{' '}
+          {f.hint && <small>{f.hint}</small>}
+          {errors[f.name] && (
+            <small className="error-text">
+              {String(errors[f.name]?.message)}
+            </small>
+          )}
+        </label>
+      ))}
+      {children}
+      <button
+        className="button primary"
+        type="submit"
+        disabled={busy || isSubmitting}
+      >
+        {busy || isSubmitting ? (
+          <LoaderCircle className="spin" size={17} />
+        ) : (
+          <Check size={17} />
+        )}{' '}
+        {submit}
+      </button>
+    </form>
+  );
+}
+
+export function Badge({ status }: { status: string }) {
+  return (
+    <span className={`badge status-${status}`}>
+      <span />
+      {statusLabels[status] ?? status}
+    </span>
+  );
+}
