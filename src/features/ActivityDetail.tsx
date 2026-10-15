@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Users,
   Sparkles,
   House,
   AlertTriangle,
@@ -11,9 +10,10 @@ import {
   CheckCheck,
   X,
 } from 'lucide-react';
-import { Modal, Form, Badge } from '../components';
+import { Modal, Form, type ModalFeedback } from '../components';
 import OrderStayContext from './OrderStayContext';
 import OrderManagement from './OrderManagement';
+import ExecutionSummary from './ExecutionSummary';
 import {
   executionResponses,
   itemResponse,
@@ -92,16 +92,7 @@ export default function ActivityDetail({
   const [draftReady, setDraftReady] = useState(false);
   const [draftRevision, setDraftRevision] = useState(a.revision);
   const dirty = useRef(false);
-  const notification = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (executionError || submitted) {
-      notification.current?.focus({ preventScroll: true });
-      notification.current?.scrollIntoView({
-        block: 'start',
-        behavior: 'smooth',
-      });
-    }
-  }, [executionError, submitted]);
+  const [feedback, setFeedback] = useState<ModalFeedback | null>(null);
   const [draft, setDraft] = useState<Draft>();
   const [sync, setSync] = useState('Confirmado pelo servidor');
   const [finding, setFinding] = useState(false);
@@ -210,17 +201,48 @@ export default function ActivityDetail({
   );
   const findings = data.findings.filter((f) => f.activity_id === a.id);
   const order = data.service_orders.find((s) => s.activity_id === a.id);
-  const model = data.checklist_template_versions.find(
-    (t) => t.id === order?.template_id,
-  );
-  const booking = data.team_agenda.find((r) => r.id === order?.reservation_id);
   const futureOrder = Boolean(
     order &&
     ['checkin', 'checkout'].includes(order.order_type ?? '') &&
     dayKey(new Date(a.due_at)) > dayKey(new Date()),
   );
   const cycle = data.preparation_cycles.find((c) => c.id === a.cycle_id);
-  const stay = data.stays.find((s) => s.id === cycle?.stay_id);
+  const showSuccess = (message: string, terminal = false) =>
+    setFeedback({
+      kind: 'success',
+      title: terminal ? 'Atividade enviada com sucesso!' : 'Tudo certo!',
+      message,
+      actionLabel: terminal ? 'Concluir atividade' : 'Retomar vistoria',
+      onAction: terminal ? onClose : () => setFeedback(null),
+    });
+  const runAction: Run = async (
+    fn,
+    success = 'Alteração salva com sucesso.',
+  ) => {
+    setFeedback(null);
+    let failed = '';
+    const ok = await run(async () => {
+      try {
+        await fn();
+      } catch (error) {
+        failed =
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível concluir a ação.';
+        setExecutionError(failed);
+        throw error;
+      }
+    }, success);
+    if (!ok)
+      setExecutionError(
+        (previous) =>
+          failed ||
+          previous ||
+          'Não foi possível confirmar a ação. Tente novamente.',
+      );
+    else if (success) showSuccess(success);
+    return ok;
+  };
   return (
     <Modal
       title={`${unitName(a.unit_id)} · ${a.title}`}
@@ -238,73 +260,42 @@ export default function ActivityDetail({
       }}
       wide
       className="checklist-modal"
+      feedback={
+        executionError
+          ? {
+              kind: 'error',
+              title: 'Não foi possível concluir a ação',
+              message: `${executionError} Suas respostas e fotos foram mantidas. Retome a vistoria para corrigir o problema e tentar novamente.`,
+              actionLabel: 'Retomar vistoria',
+              onAction: () => {
+                setExecutionError('');
+                setFeedback(null);
+              },
+            }
+          : feedback
+      }
     >
-      <div ref={notification} tabIndex={-1}>
-        {executionError && (
-          <p className="alert error" role="alert">
-            {executionError} Suas respostas e fotos continuam aqui. Corrija o
-            problema e tente enviar novamente.
-          </p>
-        )}
-        {submitted && (
-          <div className="alert success" role="status">
-            <CheckCheck size={22} />
-            <div>
-              <strong>Enviado para aprovação com sucesso!</strong>
-              <p>A vistoria foi recebida. Você já pode fechar esta tela.</p>
-            </div>
-          </div>
-        )}
-      </div>
       {order && manager && (
-        <OrderManagement order={order} run={run} onChanged={onClose} />
+        <OrderManagement
+          order={order}
+          run={runAction}
+          onChanged={(action) => {
+            if (action === 'delete') onClose();
+          }}
+          onError={setExecutionError}
+        />
       )}
-      {order && (
-        <p className="info-card">
-          Ordem de serviço · {model?.name || 'Modelo'} · v
-          {model?.version ?? '—'}
-          {booking
-            ? ` · ${booking.guests} hóspedes · ${booking.duration_nights} diária(s) · Saída ${booking.checkout}`
-            : ''}
-          {order.parent_order_id ? ' · Checkout vinculado ao check-in' : ''}.
-          Esta execução usa a versão escolhida ao criar a ordem.
-        </p>
-      )}
+      <ExecutionSummary activity={a} data={data} person={person} />
       {order && (
         <OrderStayContext
           order={order}
           data={data}
           manager={manager}
-          run={run}
+          run={runAction}
+          showSummary={false}
+          onError={setExecutionError}
         />
       )}
-      <div className="detail-top">
-        <Badge status={a.status} />
-        <span>
-          Tentativa {a.attempt} · Revisão {a.revision}
-        </span>
-        <span>{person(a.assignee)}</span>
-      </div>
-      <div className="info-card">
-        <Users size={21} />
-        <div>
-          <strong>
-            {order ? 'Ocupação da ordem' : 'Preparação'}: {a.occupancy} hóspedes
-          </strong>
-          <p>
-            {cycle?.occupancy_source === 'base'
-              ? 'Padrão-base da unidade'
-              : 'Ocupação definida para este ciclo'}{' '}
-            · Prazo {dateTime(a.due_at)}
-          </p>
-          {stay && (
-            <p>
-              Hospedagem: {stay.guest_name} · {stay.guests} hóspedes ·{' '}
-              {stay.checkin} a {stay.checkout}
-            </p>
-          )}
-        </div>
-      </div>
       <div className="progress-line">
         <span>
           {progress({ ...a, responses })}% dos itens obrigatórios conferidos
@@ -381,7 +372,12 @@ export default function ActivityDetail({
         <button
           className="button primary full"
           disabled={busy || futureOrder}
-          onClick={() => void run(() => mutate('start'))}
+          onClick={() =>
+            void runAction(
+              () => mutate('start'),
+              'Execução iniciada. Você pode preencher o checklist.',
+            )
+          }
         >
           <Sparkles size={18} />
           Iniciar{' '}
@@ -594,7 +590,7 @@ export default function ActivityDetail({
                         <button
                           className="button secondary"
                           onClick={() =>
-                            void run(
+                            void runAction(
                               async () =>
                                 setImage({
                                   url: await signedImage(
@@ -603,7 +599,7 @@ export default function ActivityDetail({
                                   ),
                                   label: `Referência · ${i.title}`,
                                 }),
-                              'Foto de referência aberta.',
+                              '',
                             )
                           }
                         >
@@ -641,7 +637,7 @@ export default function ActivityDetail({
                 ]}
                 submit="Resolver ocorrência"
                 onSubmit={(v) =>
-                  run(() =>
+                  runAction(() =>
                     rpc('resolve_finding', { finding: f.id, reason: v.reason }),
                   )
                 }
@@ -675,7 +671,7 @@ export default function ActivityDetail({
             ]}
             onSubmit={async (v) => {
               if (
-                await run(() =>
+                await runAction(() =>
                   rpc('create_finding', {
                     activity: a.id,
                     payload: { ...v, blocking: v.blocking === 'true' },
@@ -721,7 +717,7 @@ export default function ActivityDetail({
               className="button secondary"
               disabled={busy || sending || !draftReady}
               onClick={() =>
-                void run(async () => {
+                void runAction(async () => {
                   await persist(makeDraft());
                   setSync('Rascunho salvo');
                 }, 'Rascunho salvo.')
@@ -736,7 +732,7 @@ export default function ActivityDetail({
               onClick={async () => {
                 setSending(true);
                 setExecutionError('');
-                const ok = await run(async () => {
+                const ok = await runAction(async () => {
                   try {
                     await sendExecution(makeDraft(), {
                       persist: async (d) => {
@@ -770,6 +766,10 @@ export default function ActivityDetail({
                 }, 'Vistoria enviada para aprovação com sucesso.');
                 if (ok) {
                   setSubmitted(true);
+                  showSuccess(
+                    'A vistoria foi recebida e enviada para aprovação. Você pode concluir esta etapa.',
+                    true,
+                  );
                   dirty.current = false;
                   setDraft(undefined);
                   void removeDraft(user, a.id).catch(() => {});
@@ -798,12 +798,14 @@ export default function ActivityDetail({
             <button
               className="button primary"
               disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  await mutate('approve');
-                  onClose();
-                }, 'Arrumação aprovada e unidade liberada.')
-              }
+              onClick={async () => {
+                if (
+                  await runAction(async () => {
+                    await mutate('approve');
+                  })
+                )
+                  showSuccess('Atividade aprovada com sucesso.', true);
+              }}
             >
               <CheckCheck size={18} />
               Aprovar arrumação
@@ -845,9 +847,14 @@ export default function ActivityDetail({
                 submit="Devolver para correção"
                 onSubmit={async (v) => {
                   if (
-                    await run(() => mutate('reject', { ...v, items: rejected }))
+                    await runAction(() =>
+                      mutate('reject', { ...v, items: rejected }),
+                    )
                   )
-                    onClose();
+                    showSuccess(
+                      'A atividade foi devolvida para correção.',
+                      true,
+                    );
                 }}
               />
             </>
@@ -900,7 +907,7 @@ export default function ActivityDetail({
             ]}
             submit="Atualizar programação"
             onSubmit={(v) =>
-              run(() =>
+              runAction(() =>
                 mutate('schedule', {
                   ...v,
                   due_at: new Date(v.due_at).toISOString(),
@@ -912,7 +919,8 @@ export default function ActivityDetail({
             fields={[{ name: 'reason', label: 'Justificativa para cancelar' }]}
             submit="Cancelar atividade"
             onSubmit={async (v) => {
-              if (await run(() => mutate('cancel', v))) onClose();
+              if (await runAction(() => mutate('cancel', v)))
+                showSuccess('Atividade cancelada com sucesso.', true);
             }}
           />
         </details>

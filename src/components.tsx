@@ -1,23 +1,64 @@
 import { statusLabels } from './domain';
-import { useEffect, useRef, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useId,
+  type ReactNode,
+} from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ArrowRight, Check, Inbox, LoaderCircle, X } from 'lucide-react';
+import {
+  ArrowRight,
+  Check,
+  CircleAlert,
+  CircleCheck,
+  Inbox,
+  LoaderCircle,
+  X,
+} from 'lucide-react';
+export type ModalFeedback = {
+  kind: 'error' | 'success';
+  title: string;
+  message: string;
+  actionLabel: string;
+  onAction: () => void;
+};
 export function Modal({
   title,
   children,
   onClose,
   wide = false,
   className = '',
+  feedback,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
   className?: string;
+  feedback?: ModalFeedback | null;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  const feedbackId = useId();
+  const hasFeedback = Boolean(feedback);
+  useLayoutEffect(() => {
+    if (!hasFeedback || !ref.current) return;
+    const dialog = ref.current;
+    const scrollTop = dialog.scrollTop;
+    const focused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    dialog.scrollTop = 0;
+    actionRef.current?.focus({ preventScroll: true });
+    return () => {
+      dialog.scrollTop = scrollTop;
+      if (focused?.isConnected) focused.focus({ preventScroll: true });
+    };
+  }, [hasFeedback]);
   useEffect(() => {
     const el = ref.current;
     el?.showModal();
@@ -26,16 +67,60 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className={`${wide ? 'modal wide' : 'modal'} ${className}`}
-      onCancel={onClose}
+      className={`${wide ? 'modal wide' : 'modal'} ${className} ${hasFeedback ? 'modal-feedback-open' : ''}`}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (feedback) feedback.onAction();
+        else onClose();
+      }}
     >
-      <header className="modal-head">
-        <h2>{title}</h2>
-        <button className="icon-button" aria-label="Fechar" onClick={onClose}>
-          <X size={21} />
-        </button>
-      </header>
-      {children}
+      <div
+        className="modal-content"
+        inert={hasFeedback}
+        aria-hidden={hasFeedback || undefined}
+      >
+        <header className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon-button" aria-label="Fechar" onClick={onClose}>
+            <X size={21} />
+          </button>
+        </header>
+        {children}
+      </div>
+      {feedback && (
+        <div
+          className={`modal-feedback modal-feedback-${feedback.kind}`}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby={`${feedbackId}-title`}
+          aria-describedby={`${feedbackId}-message`}
+          onKeyDown={(e) => {
+            if (e.key === 'Tab') {
+              e.preventDefault();
+              actionRef.current?.focus();
+            }
+          }}
+        >
+          <div className="modal-feedback-card">
+            <span className="modal-feedback-icon">
+              {feedback.kind === 'error' ? (
+                <CircleAlert size={36} />
+              ) : (
+                <CircleCheck size={36} />
+              )}
+            </span>
+            <h2 id={`${feedbackId}-title`}>{feedback.title}</h2>
+            <p id={`${feedbackId}-message`}>{feedback.message}</p>
+            <button
+              ref={actionRef}
+              className="button primary"
+              onClick={feedback.onAction}
+            >
+              {feedback.actionLabel}
+            </button>
+          </div>
+        </div>
+      )}
     </dialog>
   );
 }

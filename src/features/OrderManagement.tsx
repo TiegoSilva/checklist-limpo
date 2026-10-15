@@ -14,10 +14,12 @@ export default function OrderManagement({
   order,
   run,
   onChanged,
+  onError,
 }: {
   order: Service;
   run: Run;
-  onChanged: () => void;
+  onChanged: (action?: 'status' | 'delete') => void;
+  onError?: (message: string) => void;
 }) {
   const [status, setStatus] = useState(order.status),
     [reason, setReason] = useState(''),
@@ -31,6 +33,7 @@ export default function OrderManagement({
   const act = async (action: 'status' | 'delete') => {
     if (reason.trim().length < 5) {
       setError('Informe o motivo, com pelo menos 5 caracteres.');
+      onError?.('Informe o motivo, com pelo menos 5 caracteres.');
       return;
     }
     setBusy(true);
@@ -58,7 +61,7 @@ export default function OrderManagement({
         : 'Status da ordem atualizado.',
     );
     setBusy(false);
-    if (ok) onChanged();
+    if (ok) onChanged(action);
   };
   return (
     <details className="room-section order-management">
@@ -69,7 +72,7 @@ export default function OrderManagement({
       <p className="muted">
         Alterações de status e exclusões ficam registradas no histórico.
       </p>
-      {error && (
+      {error && !onError && (
         <p className="alert error" role="alert">
           {error}
         </p>

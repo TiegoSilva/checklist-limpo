@@ -15,6 +15,9 @@ import {
   type Service,
 } from '../src/domain';
 import type { Draft } from '../src/lib/client';
+import { Modal } from '../src/components';
+import ExecutionSummary from '../src/features/ExecutionSummary';
+import OrderStayContext from '../src/features/OrderStayContext';
 const item: Item = {
   id: 'cup',
   title: 'Copos',
@@ -195,3 +198,108 @@ describe('execução simplificada e retomada', () => {
     expect(html).toContain('Excluir ordem');
   });
 });
+
+it('mostra o contexto da ordem em um resumo único, sem repetir ocupação e programação', () => {
+  const data = {
+    ...emptyData,
+    service_orders: [
+      {
+        id: 'checkin',
+        unit_id: 'unit',
+        activity_id: activity.id,
+        template_id: 'model',
+        reservation_id: 'stay',
+        order_type: 'checkin',
+        checkin_order_id: 'checkin',
+        scheduled_start_at: '2026-10-15T16:30:00Z',
+        due_at: '2026-10-15T18:00:00Z',
+        status: 'review',
+        title: 'Check-in',
+        description: '',
+        priority: 'normal',
+        assignee: 'person',
+        blocking: false,
+        revision: 1,
+      } as Service,
+    ],
+    checklist_template_versions: [
+      {
+        id: 'model',
+        unit_id: 'unit',
+        kind: 'cleaning',
+        name: 'Preparação completa',
+        version: 3,
+        items: [item],
+      },
+    ],
+    team_agenda: [
+      {
+        id: 'stay',
+        unit_id: 'unit',
+        guests: 2,
+        checkin: '2026-10-15',
+        checkout: '2026-10-16',
+        duration_nights: 1,
+        checkout_time: '12:30',
+        revision: 0,
+        inspector: null,
+        cleaner: null,
+        cycle_id: 'cycle',
+        inspection_status: 'pending',
+        cleaning_status: 'review',
+      },
+    ],
+  };
+  const html = renderToStaticMarkup(
+    <>
+      <ExecutionSummary
+        activity={activity}
+        data={data}
+        person={() => 'Colaborador'}
+      />
+      <OrderStayContext
+        order={data.service_orders[0]}
+        data={data}
+        manager={false}
+        run={vi.fn()}
+        showSummary={false}
+      />
+    </>,
+  );
+  expect(html.match(/Programação/g)).toHaveLength(1);
+  expect(html.match(/Hóspedes/g)).toHaveLength(1);
+  expect(html.match(/Preparação completa/g)).toHaveLength(1);
+  expect(html).not.toMatch(/Check-in de origem|Ocupação da ordem|Prazo/);
+  expect(html).toContain('15/10/2026 a 16/10/2026');
+});
+it.each(['error', 'success'] as const)(
+  'exibe %s sobre o modal e bloqueia os controles ao fundo',
+  (kind) => {
+    const html = renderToStaticMarkup(
+      <Modal
+        title="Checklist"
+        onClose={vi.fn()}
+        feedback={{
+          kind,
+          title:
+            kind === 'error'
+              ? 'Não foi possível enviar'
+              : 'Enviado com sucesso',
+          message: 'Mensagem central',
+          actionLabel:
+            kind === 'error' ? 'Retomar vistoria' : 'Concluir atividade',
+          onAction: vi.fn(),
+        }}
+      >
+        <input aria-label="Quantidade" />
+      </Modal>,
+    );
+    expect(html).toContain('role="alertdialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('inert=""');
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain(
+      kind === 'error' ? 'Retomar vistoria' : 'Concluir atividade',
+    );
+  },
+);

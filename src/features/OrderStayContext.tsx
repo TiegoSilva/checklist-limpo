@@ -25,21 +25,27 @@ export default function OrderStayContext({
   data,
   manager,
   run,
+  showSummary = true,
+  onError,
 }: {
   order: Service;
   data: Data;
   manager: boolean;
   run: Run;
+  showSummary?: boolean;
+  onError?: (message: string) => void;
 }) {
   const [error, setError] = useState('');
   const stay = data.team_agenda.find((r) => r.id === order.reservation_id);
   const origin = order.checkin_order_id ?? order.parent_order_id;
   return (
     <section className="order-stay-context">
-      <p className="muted">
-        Programação: <strong>{serviceWindow(order)}</strong>
-      </p>
-      {origin && (
+      {showSummary && (
+        <p className="muted">
+          Programação: <strong>{serviceWindow(order)}</strong>
+        </p>
+      )}
+      {showSummary && origin && (
         <p className="muted">
           Check-in de origem #{origin.slice(0, 8)}
           {stay
@@ -54,7 +60,7 @@ export default function OrderStayContext({
             A janela de execução será atualizada na agenda da equipe. O check-in
             e as respostas registradas serão preservados.
           </p>
-          {error && (
+          {error && !onError && (
             <p role="alert" className="error-text">
               {error}
             </p>
@@ -103,6 +109,11 @@ export default function OrderStayContext({
                     },
                   });
                 } catch (e) {
+                  onError?.(
+                    e instanceof Error
+                      ? e.message
+                      : 'Não foi possível atualizar.',
+                  );
                   setError(
                     e instanceof Error
                       ? e.message
