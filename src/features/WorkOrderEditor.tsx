@@ -27,6 +27,10 @@ export function departureDate(arrival: string, nights: number) {
   d.setUTCDate(d.getUTCDate() + nights);
   return d.toISOString().slice(0, 10);
 }
+export const validTimeWindow = (start: string, end: string) =>
+  /^([01]\d|2[0-3]):[0-5]\d$/.test(start) &&
+  /^([01]\d|2[0-3]):[0-5]\d$/.test(end) &&
+  start < end;
 type Mode = 'task' | 'checklist';
 export type OrderDraft = {
   intent: 'checkin' | 'task' | 'checklist';
@@ -38,14 +42,15 @@ export type OrderDraft = {
   guests: number;
   occupancy: number;
   model: string;
-  outModel: string;
   checkinMode: Mode | 'auto';
-  outMode: Mode | 'auto';
   assignee: string;
   outAssignee: string;
   due: string;
   checkinTime: string;
   checkoutTime: string;
+  checkinEndTime: string;
+  checkoutEndTime: string;
+  checkinOrder: string;
   priority: string;
   blocking: boolean;
   finding: string;
@@ -71,17 +76,13 @@ export function orderStaff(
 }
 export function initialOrderDraft(
   data: Data,
-  type: 'general' | 'checkin' = 'general',
+  _type: 'general' | 'checkin' = 'general',
 ): OrderDraft {
   const unit = data.units.length === 1 ? data.units[0].id : '';
-  const staff = orderStaff(
-      data,
-      unit,
-      type === 'checkin' ? 'cleaner' : undefined,
-    ),
+  const staff = orderStaff(data, unit, 'cleaner'),
     inspectors = orderStaff(data, unit, 'inspector');
   return {
-    intent: type === 'checkin' ? 'checkin' : 'task',
+    intent: 'checkin',
     unit,
     title: '',
     description: '',
@@ -90,14 +91,15 @@ export function initialOrderDraft(
     guests: 1,
     occupancy: data.units.find((u) => u.id === unit)?.base_occupancy ?? 1,
     model: '',
-    outModel: '',
     checkinMode: 'auto',
-    outMode: 'auto',
     assignee: staff.length === 1 ? staff[0].id : '',
     outAssignee: inspectors.length === 1 ? inspectors[0].id : '',
     due: '',
-    checkinTime: '14:00',
-    checkoutTime: '12:00',
+    checkinTime: '13:30',
+    checkinEndTime: '15:00',
+    checkoutTime: '11:30',
+    checkoutEndTime: '12:30',
+    checkinOrder: '',
     priority: 'normal',
     blocking: false,
     finding: '',
@@ -110,9 +112,7 @@ export function orderPlan(data: Data, d: OrderDraft) {
   const incoming = models.filter(
     (t) => d.intent !== 'checkin' || t.kind === 'cleaning',
   );
-  const outgoing = models.filter((t) => t.kind === 'inspection');
   const model = incoming.find((t) => t.id === d.model) ?? incoming[0];
-  const outModel = outgoing.find((t) => t.id === d.outModel) ?? outgoing[0];
   const mode: Mode =
     d.intent === 'task'
       ? 'task'
@@ -124,8 +124,16 @@ export function orderPlan(data: Data, d: OrderDraft) {
             : 'task'
           : d.checkinMode;
   const outMode: Mode =
-    d.outMode === 'auto' ? (outModel ? 'checklist' : 'task') : d.outMode;
-  return { incoming, outgoing, model, outModel, mode, outMode };
+    mode === 'checklist' &&
+    model?.items.some(
+      (i) =>
+        i.mode === 'count' &&
+        (!i.min_guests || d.guests >= i.min_guests) &&
+        (!i.max_guests || d.guests <= i.max_guests),
+    )
+      ? 'checklist'
+      : 'task';
+  return { incoming, model, mode, outMode };
 }
 export function orderStepError(
   data: Data,
@@ -170,16 +178,13 @@ export function orderStepError(
         )
       )
         return 'Escolha o responsável pelo checkout.';
+      if (plan.mode === 'checklist' && !plan.model)
+        return 'Escolha um modelo ativo de check-in ou use tarefa simples.';
       if (
-        (plan.mode === 'checklist' && !plan.model) ||
-        (plan.outMode === 'checklist' && !plan.outModel)
+        !validTimeWindow(d.checkinTime, d.checkinEndTime) ||
+        !validTimeWindow(d.checkoutTime, d.checkoutEndTime)
       )
-        return 'Escolha modelos ativos para as duas ordens ou use tarefa simples.';
-      if (
-        !/^\d{2}:\d{2}$/.test(d.checkinTime) ||
-        !/^\d{2}:\d{2}$/.test(d.checkoutTime)
-      )
-        return 'Informe os horários de entrada e saída.';
+        return 'Informe faixas válidas: o fim deve ser depois do início.';
     } else if (!d.due || !Number.isFinite(new Date(d.due).getTime()))
       return 'Informe a data e o horário do prazo.';
   }
@@ -206,14 +211,14 @@ export function buildOrderPayload(data: Data, d: OrderDraft, id: string) {
           checkin: d.arrival,
           duration_nights: d.nights,
           guests: d.guests,
-          checkin_time: d.checkinTime,
-          checkout_time: d.checkoutTime,
+          checkin_start_time: d.checkinTime,
+          checkin_time: d.checkinEndTime,
+          checkout_start_time: d.checkoutTime,
+          checkout_time: d.checkoutEndTime,
           checkout_assignee: d.outAssignee,
-          checkout_execution_mode: plan.outMode,
-          checkout_template_id:
-            plan.outMode === 'checklist' ? plan.outModel?.id : null,
         }
       : {
+          checkin_order_id: d.checkinOrder || null,
           title:
             d.intent === 'checklist'
               ? `Checklist · ${checklistLabel(plan.model!.kind)}`
@@ -268,7 +273,7 @@ export default function WorkOrderEditor({
     patch({
       unit: value,
       model: '',
-      outModel: '',
+      checkinOrder: '',
       occupancy: data.units.find((u) => u.id === value)?.base_occupancy ?? 1,
       assignee: staff.some((p) => p.id === draft.assignee)
         ? draft.assignee
@@ -323,30 +328,22 @@ export default function WorkOrderEditor({
       </label>
     );
   };
-  const modelField = (out = false) => (
+  const modelField = () => (
     <label className="field">
-      <span>
-        {out
-          ? 'Modelo de checkout'
-          : stay
-            ? 'Modelo de check-in'
-            : 'Modelo de checklist'}
-      </span>
+      <span>{stay ? 'Modelo de check-in' : 'Modelo de checklist'}</span>
       <select
         required
-        value={(out ? plan.outModel : plan.model)?.id ?? ''}
-        onChange={(e) =>
-          patch(out ? { outModel: e.target.value } : { model: e.target.value })
-        }
+        value={plan.model?.id ?? ''}
+        onChange={(e) => patch({ model: e.target.value })}
       >
         <option value="">Escolha um modelo</option>
-        {(out ? plan.outgoing : plan.incoming).map((t) => (
+        {plan.incoming.map((t) => (
           <option key={t.id} value={t.id}>
             {checklistLabel(t.kind)} · v{t.version}
           </option>
         ))}
       </select>
-      {!(out ? plan.outgoing : plan.incoming).length && (
+      {!plan.incoming.length && (
         <small>Nenhum modelo ativo para esta unidade.</small>
       )}
     </label>
@@ -424,7 +421,7 @@ export default function WorkOrderEditor({
             const ok = await run(
               async () => {
                 try {
-                  return await rpc('create_work_order', { payload });
+                  return await rpc('create_scheduled_work_order', { payload });
                 } catch (err) {
                   setError(
                     err instanceof Error
@@ -678,90 +675,123 @@ export default function WorkOrderEditor({
                       : 'Check-in como tarefa simples'}{' '}
                     ·{' '}
                     {plan.outMode === 'checklist'
-                      ? 'Modelo de checkout incluído'
+                      ? 'Checkout gerado com os itens do check-in'
                       : 'Checkout como tarefa simples'}
                   </p>
-                  <details className="wizard-options">
-                    <summary>Ajustar modelos e horários</summary>
-                    <div className="wizard-fields">
+                  <label className="field">
+                    <span>Modelo de check-in</span>
+                    <select
+                      value={
+                        plan.mode === 'task'
+                          ? 'task'
+                          : (plan.model?.id ?? 'task')
+                      }
+                      onChange={(e) =>
+                        patch({
+                          checkinMode:
+                            e.target.value === 'task' ? 'task' : 'checklist',
+                          model:
+                            e.target.value === 'task' ? '' : e.target.value,
+                        })
+                      }
+                    >
+                      <option value="task">Tarefa simples (sem modelo)</option>
+                      {plan.incoming.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {checklistLabel(t.kind)} · v{t.version}
+                        </option>
+                      ))}
+                    </select>
+                    <small>
+                      O checkout usa os mesmos itens e quantidades deste
+                      check-in, sem escolher outro modelo.
+                    </small>
+                  </label>
+                  <div className="wizard-fields">
+                    <div className="two-cols">
                       <label className="field">
-                        <span>Execução do check-in</span>
-                        <select
-                          value={draft.checkinMode}
+                        <span>Check-in · início</span>
+                        <input
+                          type="time"
+                          required
+                          value={draft.checkinTime}
                           onChange={(e) =>
-                            patch({
-                              checkinMode: e.target
-                                .value as OrderDraft['checkinMode'],
-                            })
+                            patch({ checkinTime: e.target.value })
                           }
-                        >
-                          <option value="auto">
-                            Usar configuração da unidade
-                          </option>
-                          <option value="checklist">Modelo de checklist</option>
-                          <option value="task">Tarefa simples</option>
-                        </select>
+                        />
                       </label>
-                      {plan.mode === 'checklist' && modelField()}
                       <label className="field">
-                        <span>Execução do checkout</span>
-                        <select
-                          value={draft.outMode}
+                        <span>Check-in · fim</span>
+                        <input
+                          type="time"
+                          required
+                          value={draft.checkinEndTime}
                           onChange={(e) =>
-                            patch({
-                              outMode: e.target.value as OrderDraft['outMode'],
-                            })
+                            patch({ checkinEndTime: e.target.value })
                           }
-                        >
-                          <option value="auto">
-                            Usar configuração da unidade
-                          </option>
-                          <option value="checklist">Modelo de checklist</option>
-                          <option value="task">Tarefa simples</option>
-                        </select>
+                        />
                       </label>
-                      {plan.outMode === 'checklist' && modelField(true)}
-                      <div className="two-cols">
-                        <label className="field">
-                          <span>Entrada</span>
-                          <input
-                            type="time"
-                            required
-                            value={draft.checkinTime}
-                            onChange={(e) =>
-                              patch({ checkinTime: e.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Saída</span>
-                          <input
-                            type="time"
-                            required
-                            value={draft.checkoutTime}
-                            onChange={(e) =>
-                              patch({ checkoutTime: e.target.value })
-                            }
-                          />
-                        </label>
-                      </div>
                       <label className="field">
-                        <span>Observações (opcional)</span>
-                        <textarea
-                          rows={2}
-                          value={draft.description}
+                        <span>Checkout · início</span>
+                        <input
+                          type="time"
+                          required
+                          value={draft.checkoutTime}
                           onChange={(e) =>
-                            patch({ description: e.target.value })
+                            patch({ checkoutTime: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Checkout · fim</span>
+                        <input
+                          type="time"
+                          required
+                          value={draft.checkoutEndTime}
+                          onChange={(e) =>
+                            patch({ checkoutEndTime: e.target.value })
                           }
                         />
                       </label>
                     </div>
-                  </details>
+                    <label className="field">
+                      <span>Observações (opcional)</span>
+                      <textarea
+                        rows={2}
+                        value={draft.description}
+                        onChange={(e) => patch({ description: e.target.value })}
+                      />
+                    </label>
+                  </div>
                 </>
               ) : (
                 <details className="wizard-options">
                   <summary>Prioridade e outras opções</summary>
                   <div className="wizard-fields">
+                    <label className="field">
+                      <span>Check-in de origem (opcional)</span>
+                      <select
+                        value={draft.checkinOrder}
+                        onChange={(e) =>
+                          patch({ checkinOrder: e.target.value })
+                        }
+                      >
+                        <option value="">Ordem avulsa</option>
+                        {data.service_orders
+                          .filter(
+                            (o) =>
+                              o.unit_id === draft.unit &&
+                              o.order_type === 'checkin' &&
+                              o.status !== 'cancelled',
+                          )
+                          .map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {new Date(o.due_at).toLocaleDateString('pt-BR')} ·{' '}
+                              {o.title} · #{o.id.slice(0, 8)}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
                     <label className="field">
                       <span>Prioridade</span>
                       <select
@@ -866,7 +896,7 @@ export default function WorkOrderEditor({
                     {data.profiles.find((p) => p.id === draft.assignee)?.name}
                     {stay && (
                       <small>
-                        {draft.checkinTime} ·{' '}
+                        {draft.checkinTime}–{draft.checkinEndTime} ·{' '}
                         {plan.mode === 'checklist'
                           ? `Checklist v${plan.model?.version}`
                           : 'Tarefa simples'}
@@ -883,9 +913,10 @@ export default function WorkOrderEditor({
                           ?.name
                       }
                       <small>
-                        {shortDate(departure)} às {draft.checkoutTime} ·{' '}
+                        {shortDate(departure)} · {draft.checkoutTime}–
+                        {draft.checkoutEndTime} ·{' '}
                         {plan.outMode === 'checklist'
-                          ? `Checklist v${plan.outModel?.version}`
+                          ? 'Itens do check-in'
                           : 'Tarefa simples'}
                       </small>
                     </dd>

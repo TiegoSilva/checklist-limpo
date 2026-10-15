@@ -73,6 +73,16 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (
+      ['create_scheduled_work_order', 'reschedule_checkout_window'].includes(
+        name,
+      ) &&
+      error.code === 'PGRST202'
+    ) {
+      throw new Error(
+        'Aplique a migração 202610150009_checkin_execution_windows.sql no Supabase para ativar os horários e o checkout derivado do check-in.',
+      );
+    }
     if (name === 'set_checklist_archived' && error.code === 'PGRST202') {
       throw new Error(
         'Aplique a migração 202610150008_archive_checklists.sql no Supabase para remover e restaurar modelos.',

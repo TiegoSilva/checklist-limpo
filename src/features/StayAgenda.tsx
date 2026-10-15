@@ -60,7 +60,11 @@ export default function StayAgenda({
           {entries.map((r) => {
             const unit = data.units.find((u) => u.id === r.unit_id);
             const canEdit = r.checkout_order_id
-              ? r.inspection_status === 'pending'
+              ? r.inspection_status === 'pending' ||
+                (r.checkout === today() &&
+                  ['in_progress', 'correction'].includes(
+                    r.inspection_status ?? '',
+                  ))
               : !r.cycle_id ||
                 [r.inspection_status, r.cleaning_status].every(
                   (s) => s === 'pending',
@@ -80,12 +84,22 @@ export default function StayAgenda({
                 <div>
                   <small>Entrada</small>
                   <strong>{displayDate(r.checkin)}</strong>
+                  {r.checkin_start_time && (
+                    <small>
+                      {r.checkin_start_time.slice(0, 5)}–
+                      {r.checkin_end_time?.slice(0, 5)}
+                    </small>
+                  )}
                 </div>
                 <div>
                   <small>Saída</small>
-                  <strong>
-                    {displayDate(r.checkout)} · {r.checkout_time.slice(0, 5)}
-                  </strong>
+                  <strong>{displayDate(r.checkout)}</strong>
+                  <small>
+                    {r.checkout_start_time
+                      ? `${r.checkout_start_time.slice(0, 5)}–`
+                      : ''}
+                    {r.checkout_time.slice(0, 5)}
+                  </small>
                 </div>
                 <span className="muted">
                   {!r.cycle_id && !r.checkout_order_id
@@ -96,7 +110,7 @@ export default function StayAgenda({
                             : r.cleaning_status === 'completed'
                         )
                       ? 'Concluída'
-                      : canEdit
+                      : r.inspection_status === 'pending' || !r.cycle_id
                         ? 'Checkout programado'
                         : 'Em execução'}
                 </span>
@@ -132,15 +146,28 @@ export default function StayAgenda({
           <Form
             submit="Salvar saída"
             fields={[
+              ...(!editing.checkout_order_id ||
+              editing.inspection_status === 'pending'
+                ? [
+                    {
+                      name: 'checkout',
+                      label: 'Nova data de saída',
+                      type: 'date',
+                      value: editing.checkout,
+                    },
+                  ]
+                : []),
               {
-                name: 'checkout',
-                label: 'Nova data de saída',
-                type: 'date',
-                value: editing.checkout,
+                name: 'checkout_start_time',
+                label: 'Início do checkout',
+                type: 'time',
+                value: (
+                  editing.checkout_start_time ?? editing.checkout_time
+                ).slice(0, 5),
               },
               {
                 name: 'checkout_time',
-                label: 'Horário',
+                label: 'Fim do checkout',
                 type: 'time',
                 value: editing.checkout_time.slice(0, 5),
               },
@@ -150,10 +177,13 @@ export default function StayAgenda({
               setError('');
               const ok = await run(async () => {
                 try {
-                  return await rpc('reschedule_checkout', {
+                  return await rpc('reschedule_checkout_window', {
                     reservation: editing.id,
                     expected_revision: editing.revision,
-                    payload,
+                    payload: {
+                      ...payload,
+                      checkout: payload.checkout || editing.checkout,
+                    },
                   });
                 } catch (e) {
                   setError(

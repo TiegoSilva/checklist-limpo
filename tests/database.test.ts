@@ -1345,10 +1345,10 @@ describe.sequential('ordens de serviço, modelos e estadia', () => {
     outActivity = orders[1].activity_id;
     expect(orders[1].parent_order_id).toBe(inOrder);
     expect(new Date(orders[0].due_at).toISOString()).toBe(
-      '2020-02-01T17:00:00.000Z',
+      '2020-02-01T18:00:00.000Z',
     );
     expect(new Date(orders[1].due_at).toISOString()).toBe(
-      '2020-02-04T15:00:00.000Z',
+      '2020-02-04T15:30:00.000Z',
     );
     const activities = (
       await db.query<{ occupancy: number; items: ItemLike[] }>(
@@ -1498,7 +1498,7 @@ describe.sequential('ordens de serviço, modelos e estadia', () => {
           )
         ).rows[0].due_at,
       ).toISOString(),
-    ).toBe('2020-02-05T15:00:00.000Z');
+    ).toBe('2020-02-05T15:30:00.000Z');
     expect(
       (
         await db.query(
@@ -1702,9 +1702,9 @@ describe.sequential('ordens de serviço, modelos e estadia', () => {
         [id],
       )
     ).rows[0];
-    expect(new Date(out.due_at).toISOString()).toBe('2020-06-05T15:00:00.000Z');
+    expect(new Date(out.due_at).toISOString()).toBe('2020-06-05T15:30:00.000Z');
   });
-  it('reverte a criação inteira quando a duração ou o modelo de checkout é inválido', async () => {
+  it('reverte a criação inteira quando a duração ou o modelo de check-in é inválido', async () => {
     const next = {
       ...booking(),
       event_id: '00000000-0000-4000-8000-000000000094',
@@ -1717,7 +1717,7 @@ describe.sequential('ordens de serviço, modelos e estadia', () => {
     ).rejects.toThrow(/diárias/);
     await expect(
       rpc('create_work_order', [
-        JSON.stringify({ ...next, checkout_template_id: modelIn }),
+        JSON.stringify({ ...next, template_id: modelOut }),
       ]),
     ).rejects.toThrow(/Modelo incompatível/);
     expect(
@@ -1951,5 +1951,307 @@ describe.sequential('remoção e restauração de modelos', () => {
         )
       ).rows[0].archived_at,
     ).toBeTruthy();
+  });
+});
+
+describe.sequential('checkout derivado, vínculos e janelas de execução', () => {
+  let target: string,
+    model: string,
+    incoming: string,
+    outgoing: string,
+    activity: string,
+    today: string;
+  it('gera a saída da versão exata do check-in, com quantidades e horários padrão, ignorando escolhas independentes de saída', async () => {
+    await asUser(admin);
+    await rpc('configure', [
+      'member',
+      JSON.stringify({
+        org_id: org,
+        email: 'worker@aja.test',
+        name: 'Colaborador',
+        roles: ['cleaner', 'inspector'],
+        properties: [property],
+      }),
+    ]);
+    target = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Janelas',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    model = (await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: target,
+        kind: 'cleaning',
+        items: [sharedCup, { ...item, evidence_required: false }],
+      }),
+    ])) as string;
+    // Uma versão posterior não pode substituir a escolhida para a estadia.
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: target,
+        kind: 'cleaning',
+        items: [
+          { ...sharedCup, expected: 9 },
+          { ...item, evidence_required: false },
+        ],
+      }),
+    ]);
+    today = (
+      await db.query<{ date_value: string }>(
+        "select to_char(now() at time zone 'America/Sao_Paulo','YYYY-MM-DD') as date_value",
+      )
+    ).rows[0].date_value;
+    const arrival = (
+      await db.query<{ date_value: string }>(
+        "select to_char((now() at time zone 'America/Sao_Paulo')::date-2,'YYYY-MM-DD') as date_value",
+      )
+    ).rows[0].date_value;
+    incoming = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: target,
+        order_type: 'checkin',
+        execution_mode: 'checklist',
+        template_id: model,
+        assignee: worker,
+        checkout_assignee: worker,
+        guest_name: 'Teste janela',
+        guests: 2,
+        duration_nights: 2,
+        checkin: arrival,
+        checkout_execution_mode: 'task',
+        checkout_template_id: unit,
+      }),
+    ])) as string;
+    const rows = (
+      await db.query<{
+        id: string;
+        activity_id: string;
+        template_id: string;
+        checkin_order_id: string;
+        start_time: string;
+        end_time: string;
+      }>(
+        "select *,to_char(scheduled_start_at at time zone 'America/Sao_Paulo','HH24:MI') start_time,to_char(due_at at time zone 'America/Sao_Paulo','HH24:MI') end_time from service_orders where reservation_id=$1 order by order_type",
+        [incoming],
+      )
+    ).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => [r.start_time, r.end_time])).toEqual([
+      ['13:30', '15:00'],
+      ['11:30', '12:30'],
+    ]);
+    expect(
+      rows.every(
+        (r) => r.checkin_order_id === incoming && r.template_id === model,
+      ),
+    ).toBe(true);
+    outgoing = rows[1].id;
+    activity = rows[1].activity_id;
+    const out = (
+      await db.query<{ items: ItemLike[]; kind: string; occupancy: number }>(
+        'select * from activities where id=$1',
+        [activity],
+      )
+    ).rows[0];
+    expect(out.kind).toBe('inspection');
+    expect(out.occupancy).toBe(2);
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0].id).toBe('cup');
+    expect(out.items[0].expected).toBe(4);
+    const agenda = (
+      await db.query<{ checkout_start_time: string; checkout_time: string }>(
+        'select * from team_agenda where id=$1',
+        [incoming],
+      )
+    ).rows[0];
+    expect(agenda.checkout_start_time).toBe('11:30:00');
+    expect(agenda.checkout_time).toBe('12:30:00');
+    expect(
+      await rpc('create_scheduled_work_order', [
+        JSON.stringify({ event_id: incoming, unit_id: target }),
+      ]),
+    ).toBe(incoming);
+  });
+  it('vincula várias ordens extras ao mesmo check-in e rejeita origem de outra unidade', async () => {
+    const payload = {
+      unit_id: target,
+      title: 'Trocar lâmpada',
+      assignee: worker,
+      due_at: today + 'T17:00:00-03:00',
+      checkin_order_id: incoming,
+    };
+    for (let i = 0; i < 2; i++) {
+      const id = await rpc('create_scheduled_work_order', [
+        JSON.stringify(payload),
+      ]);
+      const row = (
+        await db.query<{ checkin_order_id: string; reservation_id: string }>(
+          'select * from service_orders where id=$1',
+          [id],
+        )
+      ).rows[0];
+      expect(row.checkin_order_id).toBe(incoming);
+      expect(row.reservation_id).toBe(incoming);
+    }
+    await expect(
+      rpc('create_scheduled_work_order', [
+        JSON.stringify({ ...payload, unit_id: unit }),
+      ]),
+    ).rejects.toThrow(/origem incompatível/);
+  });
+  it('permite ao gestor ajustar a janela no dia, mesmo iniciada, preservando respostas e check-in', async () => {
+    await asUser(worker);
+    await action(activity, 'start');
+    await action(activity, 'save', {
+      responses: {
+        cup: {
+          confirmed: false,
+          found: 3,
+          condition: 'divergent',
+          note: 'Falta um copo',
+        },
+      },
+    });
+    const before = (
+      await db.query<{
+        responses: unknown;
+        items: unknown;
+        started_at: unknown;
+      }>('select * from activities where id=$1', [activity])
+    ).rows[0];
+    const inBefore = (
+      await db.query('select * from service_orders where id=$1', [incoming])
+    ).rows[0];
+    const change = {
+      checkout: today,
+      checkout_start_time: '10:30',
+      checkout_time: '11:45',
+      reason: 'Hóspede saiu mais cedo',
+    };
+    await expect(
+      rpc('reschedule_checkout_window', [incoming, 0, JSON.stringify(change)]),
+    ).rejects.toThrow(/Acesso negado/);
+    await asUser(outsider);
+    await expect(
+      rpc('reschedule_checkout_window', [incoming, 0, JSON.stringify(change)]),
+    ).rejects.toThrow(/Acesso negado/);
+    await asUser(admin);
+    await expect(
+      rpc('reschedule_checkout_window', [
+        incoming,
+        0,
+        JSON.stringify({ ...change, checkout_time: '09:00' }),
+      ]),
+    ).rejects.toThrow(/fim/);
+    await rpc('reschedule_checkout_window', [
+      incoming,
+      0,
+      JSON.stringify(change),
+    ]);
+    const after = (
+      await db.query<{
+        responses: unknown;
+        items: unknown;
+        started_at: unknown;
+        status: string;
+        due_at: Date;
+      }>('select * from activities where id=$1', [activity])
+    ).rows[0];
+    expect(after.responses).toEqual(before.responses);
+    expect(after.items).toEqual(before.items);
+    expect(after.started_at).toEqual(before.started_at);
+    expect(after.status).toBe('in_progress');
+    expect(
+      (await db.query('select * from service_orders where id=$1', [incoming]))
+        .rows[0],
+    ).toEqual(inBefore);
+    const out = (
+      await db.query<{ scheduled_start_at: Date; due_at: Date }>(
+        'select * from service_orders where id=$1',
+        [outgoing],
+      )
+    ).rows[0];
+    expect(new Date(out.scheduled_start_at).toISOString()).toBe(
+      today + 'T13:30:00.000Z',
+    );
+    expect(new Date(out.due_at).toISOString()).toBe(today + 'T14:45:00.000Z');
+    expect(after.due_at).toEqual(out.due_at);
+    await expect(
+      rpc('reschedule_checkout_window', [incoming, 0, JSON.stringify(change)]),
+    ).rejects.toThrow(/alterada/);
+    const tomorrow = (
+      await db.query<{ date_value: string }>(
+        "select to_char((now() at time zone 'America/Sao_Paulo')::date+1,'YYYY-MM-DD') as date_value",
+      )
+    ).rows[0].date_value;
+    await expect(
+      rpc('reschedule_checkout_window', [
+        incoming,
+        1,
+        JSON.stringify({ ...change, checkout: tomorrow }),
+      ]),
+    ).rejects.toThrow(/somente o horário/);
+  });
+  it('bloqueia ajustes após envio para revisão e mantém a revisão independente', async () => {
+    await asUser(worker);
+    await action(activity, 'save', {
+      responses: { cup: { confirmed: true, found: 4, condition: 'ok' } },
+    });
+    await action(activity, 'submit');
+    await asUser(admin);
+    await expect(
+      rpc('reschedule_checkout_window', [
+        incoming,
+        1,
+        JSON.stringify({
+          checkout: today,
+          checkout_start_time: '11:00',
+          checkout_time: '12:00',
+          reason: 'Tentativa após envio',
+        }),
+      ]),
+    ).rejects.toThrow(/revisão/);
+    await action(activity, 'approve');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [outgoing],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+  });
+  it('rejeita faixas invertidas na criação sem criar hospedagens ou ordens parciais', async () => {
+    await expect(
+      rpc('create_scheduled_work_order', [
+        JSON.stringify({
+          unit_id: target,
+          order_type: 'checkin',
+          execution_mode: 'task',
+          assignee: worker,
+          checkout_assignee: worker,
+          guest_name: 'Inválido',
+          checkin: '2097-01-01',
+          duration_nights: 2,
+          guests: 2,
+          checkin_start_time: '16:00',
+          checkin_time: '15:00',
+        }),
+      ]),
+    ).rejects.toThrow(/fim/);
+    expect(
+      (
+        await db.query(
+          "select id from reservations where unit_id=$1 and checkin='2097-01-01'",
+          [target],
+        )
+      ).rows,
+    ).toHaveLength(0);
   });
 });

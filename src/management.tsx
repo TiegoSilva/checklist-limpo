@@ -9,6 +9,7 @@ import {
   type Service,
 } from './domain';
 import { rpc, signedImage, uploadPhoto } from './lib/client';
+import OrderStayContext from './features/OrderStayContext';
 type Run = (fn: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function MemberEditor({
   data,
@@ -178,6 +179,7 @@ export function ServiceDetail({
         {s.blocking && <span className="error-text">Impede a liberação</span>}
       </div>
       <p className="modal-description">{s.description}</p>
+      <OrderStayContext order={s} data={data} manager={manager} run={run} />
       {future && (
         <p className="info-card">
           Esta ordem estará disponível para execução no dia {dateTime(s.due_at)}

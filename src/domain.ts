@@ -69,6 +69,8 @@ export type Profile = {
   font_scale: number;
 };
 export type Service = {
+  scheduled_start_at?: string;
+  checkin_order_id?: string;
   order_type?: 'general' | 'checkin' | 'checkout';
   execution_mode?: 'task' | 'checklist';
   template_id?: string;
@@ -139,6 +141,9 @@ export type Audit = {
   correlation_id: string;
 };
 export type AgendaEntry = {
+  checkout_start_time?: string;
+  checkin_start_time?: string;
+  checkin_end_time?: string;
   checkin_order_id?: string;
   checkout_order_id?: string;
   duration_nights?: number;

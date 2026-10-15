@@ -3643,3 +3643,17 @@ input[type='checkbox']:disabled {
     appearance: auto;
   }
 }
+
+/* O aviso fica sempre abaixo do contador, em qualquer largura. */
+.count-inline > .counter-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.count-inline > .counter-row > .quantity-warning {
+  order: 2;
+  display: block;
+  text-align: right;
+  max-width: 150px;
+  font-size: 0.75rem;
+}

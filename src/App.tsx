@@ -56,6 +56,7 @@ import ChecklistPreviewDialog from './features/ChecklistPreview';
 import InventoryEditor from './features/InventoryEditor';
 import StayAgenda from './features/StayAgenda';
 import WorkOrderEditor from './features/WorkOrderEditor';
+import { serviceWindow } from './features/OrderStayContext';
 
 const navigation = [
   { path: '/', label: 'Visão geral', icon: LayoutDashboard },
@@ -452,7 +453,7 @@ function Portal({ session }: { session: Session }) {
       <div>
         <strong>{s.title}</strong>
         <small>
-          {unitName(s.unit_id)} · {person(s.assignee)} · {dateTime(s.due_at)}
+          {unitName(s.unit_id)} · {person(s.assignee)} · {serviceWindow(s)}
         </small>
         <small>
           {s.execution_mode === 'checklist'
@@ -461,7 +462,9 @@ function Portal({ session }: { session: Session }) {
           {s.template_id
             ? ` · v${data.checklist_template_versions.find((t) => t.id === s.template_id)?.version ?? '—'}`
             : ''}
-          {s.parent_order_id ? ' · Vinculado ao check-in' : ''}
+          {s.checkin_order_id || s.parent_order_id
+            ? ` · Check-in #${(s.checkin_order_id || s.parent_order_id)!.slice(0, 8)}`
+            : ''}
         </small>
         {s.blocking && (
           <small className="error-text">Impede a liberação da unidade</small>

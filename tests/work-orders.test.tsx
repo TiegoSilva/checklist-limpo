@@ -6,11 +6,40 @@ import WorkOrderEditor, {
   initialOrderDraft,
   orderStepError,
   orderPlan,
+  validTimeWindow,
 } from '../src/features/WorkOrderEditor';
+import { canAdjustCheckout } from '../src/features/OrderStayContext';
+import type { Service } from '../src/domain';
 import { emptyData } from '../src/domain';
 import StayAgenda from '../src/features/StayAgenda';
 
 describe('estadia e ordens de serviço', () => {
+  it('valida a faixa completa de início e fim sem aceitar horários invertidos', () => {
+    expect(validTimeWindow('11:30', '12:30')).toBe(true);
+    expect(validTimeWindow('13:30', '15:00')).toBe(true);
+    expect(validTimeWindow('12:30', '11:30')).toBe(false);
+    expect(validTimeWindow('12:30', '12:30')).toBe(false);
+    expect(validTimeWindow('24:00', '25:00')).toBe(false);
+  });
+  it('mostra ajuste de checkout iniciado apenas no dia de execução, antes da revisão', () => {
+    const order = { order_type: 'checkout', status: 'in_progress' } as Service;
+    expect(canAdjustCheckout(order, '2026-10-15', '2026-10-15')).toBe(true);
+    expect(canAdjustCheckout(order, '2026-10-14', '2026-10-15')).toBe(false);
+    expect(
+      canAdjustCheckout(
+        { ...order, status: 'review' },
+        '2026-10-15',
+        '2026-10-15',
+      ),
+    ).toBe(false);
+    expect(
+      canAdjustCheckout(
+        { ...order, order_type: 'checkin' },
+        '2026-10-15',
+        '2026-10-15',
+      ),
+    ).toBe(false);
+  });
   it.each([
     ['2026-10-30', 3, '2026-11-02'],
     ['2028-02-28', 2, '2028-03-01'],
@@ -43,6 +72,7 @@ describe('estadia e ordens de serviço', () => {
     );
     expect(html).toContain('O que vamos organizar?');
     expect(html).toContain('name="order-intent"');
+    expect(initialOrderDraft(emptyData).intent).toBe('checkin');
     expect(html).not.toContain('datetime-local');
     expect(html).not.toContain('Nome do hóspede');
   });
@@ -89,7 +119,10 @@ describe('estadia e ordens de serviço', () => {
       assignee: 'person',
       checkout_assignee: 'person',
       execution_mode: 'task',
-      checkout_execution_mode: 'task',
+      checkin_start_time: '13:30',
+      checkin_time: '15:00',
+      checkout_start_time: '11:30',
+      checkout_time: '12:30',
       description: 'Chegada ao fim da tarde',
     });
     const task = {

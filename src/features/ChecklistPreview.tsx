@@ -112,7 +112,7 @@ export function ChecklistPreview({
                     </div>
                     {counts[i.id] !== undefined &&
                       counts[i.id] !== i.expected && (
-                        <span className="error-text">
+                        <span className="error-text quantity-warning">
                           Quantidade divergente
                         </span>
                       )}

@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { Modal, Form, Badge } from '../components';
+import OrderStayContext from './OrderStayContext';
 import {
   dateTime,
   dayKey,
@@ -148,6 +149,14 @@ export default function ActivityDetail({
           {order.parent_order_id ? ' · Checkout vinculado ao check-in' : ''}.
           Esta execução usa a versão escolhida ao criar a ordem.
         </p>
+      )}
+      {order && (
+        <OrderStayContext
+          order={order}
+          data={data}
+          manager={manager}
+          run={run}
+        />
       )}
       <div className="detail-top">
         <Badge status={a.status} />
@@ -317,7 +326,9 @@ export default function ActivityDetail({
                           </button>
                         </label>
                         {r.found !== undefined && r.found !== i.expected && (
-                          <span className="error-text">Divergência</span>
+                          <span className="error-text quantity-warning">
+                            Quantidade divergente
+                          </span>
                         )}
                       </div>
                       <label className="field">
