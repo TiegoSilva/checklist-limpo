@@ -11,11 +11,13 @@ export function ChecklistPreview({
   unit,
   kind,
   version,
+  name,
 }: {
   items: Item[];
   unit?: Unit;
   kind: string;
   version?: number;
+  name?: string;
 }) {
   const [occupancy, setOccupancy] = useState(unit?.base_occupancy ?? 1);
   const [confirmed, setConfirmed] = useState<string[]>([]);
@@ -38,7 +40,7 @@ export function ChecklistPreview({
       <div className="preview-heading">
         <div>
           <h3>
-            {unit?.name ?? 'Unidade'} · {checklistLabel(kind)}
+            {name || checklistLabel(kind)} · {unit?.name ?? 'Unidade'}
           </h3>
           <p>
             {version ? `Versão ${version}` : 'Alterações ainda não publicadas'}
@@ -223,6 +225,7 @@ export default function ChecklistPreviewDialog({
         unit={unit}
         kind={template.kind}
         version={template.version}
+        name={template.name}
       />
     </Modal>
   );

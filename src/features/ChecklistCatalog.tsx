@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ArchiveRestore,
   ClipboardList,
+  Copy,
   Eye,
   History,
   LoaderCircle,
@@ -12,18 +13,20 @@ import {
 import { Empty, Modal } from '../components';
 import type { Data } from '../domain';
 import { rpc, type Run } from '../lib/client';
-import { checklistLabel, latestTemplates, type Template } from './checklists';
+import { templateName, latestTemplates, type Template } from './checklists';
 export default function ChecklistCatalog({
   data,
   onEdit,
   onPreview,
   onCreate,
+  onDuplicate,
   run,
 }: {
   data: Data;
   onEdit: (id: string) => void;
   onPreview: (id: string) => void;
   onCreate: () => void;
+  onDuplicate?: (id: string) => void;
   run?: Run;
 }) {
   const [removing, setRemoving] = useState<Template | null>(null),
@@ -92,8 +95,8 @@ export default function ChecklistCatalog({
             )?.name
           }
         </small>
-        <h3>{data.units.find((u) => u.id === t.unit_id)?.name ?? 'Unidade'}</h3>
-        <p>{checklistLabel(t.kind)}</p>
+        <h3>{templateName(t)}</h3>
+        <p>{data.units.find((u) => u.id === t.unit_id)?.name ?? 'Unidade'}</p>
         <span className="model-meta">
           {t.items.filter((i) => i.mode === 'count').length} itens ·{' '}
           {t.items.filter((i) => i.mode !== 'count').length} tarefas · Versão{' '}
@@ -109,15 +112,24 @@ export default function ChecklistCatalog({
           <>
             <button
               className="icon-button"
-              aria-label={`Editar modelo de ${data.units.find((u) => u.id === t.unit_id)?.name} · ${checklistLabel(t.kind)}`}
+              aria-label={`Editar ${templateName(t)} · ${data.units.find((u) => u.id === t.unit_id)?.name}`}
               title="Editar modelo"
               onClick={() => onEdit(t.id)}
             >
               <Pencil size={18} />
             </button>
+            {onDuplicate && (
+              <button
+                className="button secondary"
+                onClick={() => onDuplicate(t.id)}
+              >
+                <Copy size={17} />
+                Duplicar
+              </button>
+            )}
             <button
               className="icon-button danger-text"
-              aria-label={`Remover modelo de ${data.units.find((u) => u.id === t.unit_id)?.name} · ${checklistLabel(t.kind)}`}
+              aria-label={`Remover ${templateName(t)} · ${data.units.find((u) => u.id === t.unit_id)?.name}`}
               title="Remover modelo"
               disabled={!run || busy}
               onClick={() => {
@@ -203,7 +215,7 @@ export default function ChecklistCatalog({
           <div className="remove-illustration">
             <Trash2 size={26} />
           </div>
-          <h3>{checklistLabel(removing.kind)}</h3>
+          <h3>{templateName(removing)}</h3>
           <p className="modal-description">
             O modelo sai das novas ordens. Ordens já criadas, respostas e fotos
             continuam preservadas. Você pode restaurá-lo depois.

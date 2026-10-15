@@ -192,6 +192,8 @@ export type Data = {
   }[];
   checklist_template_versions: {
     id: string;
+    model_id?: string;
+    name?: string;
     unit_id: string;
     kind: string;
     version: number;

@@ -4,7 +4,11 @@ import { emptyData, selectItems, type Item } from '../src/domain';
 import ChecklistCatalog from '../src/features/ChecklistCatalog';
 import { ChecklistPreview } from '../src/features/ChecklistPreview';
 import TemplateEditor from '../src/features/TemplateEditor';
-import { latestTemplates, activeTemplates } from '../src/features/checklists';
+import {
+  latestTemplates,
+  activeTemplates,
+  duplicateItems,
+} from '../src/features/checklists';
 
 const towel: Item = {
   id: 'towel',
@@ -138,4 +142,83 @@ it('não oferece versões removidas como modelo ativo, mas mantém a versão par
   );
   expect(html).toContain('Modelos removidos (1)');
   expect(html).toContain('Restaurar');
+});
+
+it('mantém modelos distintos na mesma unidade mesmo quando têm o mesmo tipo', () => {
+  const models = [
+    {
+      ...data.checklist_template_versions[0],
+      id: 'a1',
+      model_id: 'a',
+      name: 'Preparação rápida',
+      version: 1,
+    },
+    {
+      ...data.checklist_template_versions[0],
+      id: 'b1',
+      model_id: 'b',
+      name: 'Preparação completa',
+      version: 2,
+    },
+    {
+      ...data.checklist_template_versions[0],
+      id: 'a2',
+      model_id: 'a',
+      name: 'Preparação rápida revisada',
+      version: 3,
+    },
+  ];
+  expect(
+    activeTemplates(models)
+      .map((t) => t.id)
+      .sort(),
+  ).toEqual(['a2', 'b1']);
+  const html = renderToStaticMarkup(
+    <ChecklistCatalog
+      data={{ ...data, checklist_template_versions: models }}
+      onEdit={vi.fn()}
+      onPreview={vi.fn()}
+      onCreate={vi.fn()}
+      onDuplicate={vi.fn()}
+    />,
+  );
+  expect(html).toContain('Preparação rápida revisada');
+  expect(html).toContain('Preparação completa');
+  expect(html.match(/>Duplicar</g)).toHaveLength(2);
+});
+it('cria um modelo em branco com nome livre e oferece cópias sem selecionar tipos fixos', () => {
+  const html = renderToStaticMarkup(
+    <TemplateEditor data={data} run={vi.fn()} onClose={vi.fn()} />,
+  );
+  expect(html).toContain('Nome do modelo');
+  expect(html).toContain('Modelo em branco');
+  expect(html).toContain('Começar a partir de');
+  expect(html).not.toContain('value="Toalhas de banho"');
+  expect(html).not.toContain('<span>Checklist</span>');
+});
+it('abre uma cópia editável com destino independente e preserva todos os atributos dos itens', () => {
+  const original = [
+    {
+      ...towel,
+      instructions: 'Conferir manchas',
+      reference_path: 'origem/foto',
+    },
+  ];
+  const copied = duplicateItems(original);
+  expect(copied[0].id).not.toBe(original[0].id);
+  expect(copied[0]).toMatchObject({ ...original[0], id: copied[0].id });
+  copied[0].expected = 8;
+  expect(original[0].expected).toBe(2);
+  const html = renderToStaticMarkup(
+    <TemplateEditor
+      data={data}
+      duplicateId="current"
+      run={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(html).toContain('Duplicar modelo de checklist');
+  expect(html).toContain('Unidade de destino');
+  expect(html).toContain('(cópia)');
+  expect(html).toContain('value="Toalhas de banho"');
 });

@@ -73,6 +73,11 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (name === 'save_named_checklist' && error.code === 'PGRST202') {
+      throw new Error(
+        'Aplique a migração 202610150010_named_checklist_models.sql no Supabase para nomear e duplicar modelos.',
+      );
+    }
     if (
       ['create_scheduled_work_order', 'reschedule_checkout_window'].includes(
         name,

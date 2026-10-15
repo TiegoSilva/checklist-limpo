@@ -71,7 +71,8 @@ describe('estadia e ordens de serviço', () => {
       <WorkOrderEditor data={emptyData} run={vi.fn()} onClose={vi.fn()} />,
     );
     expect(html).toContain('O que vamos organizar?');
-    expect(html).toContain('name="order-intent"');
+    expect(html.match(/name="order-intent"/g)).toHaveLength(2);
+    expect(html).not.toContain('value="checklist"');
     expect(initialOrderDraft(emptyData).intent).toBe('checkin');
     expect(html).not.toContain('datetime-local');
     expect(html).not.toContain('Nome do hóspede');

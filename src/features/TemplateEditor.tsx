@@ -14,16 +14,18 @@ import { type Data, type Item } from '../domain';
 import { supabase, rpc, type Run } from '../lib/client';
 import QuantityStepper from './QuantityStepper';
 import { ChecklistPreview } from './ChecklistPreview';
-import { checklistLabel, activeTemplates } from './checklists';
+import { templateName, activeTemplates, duplicateItems } from './checklists';
 
 export default function TemplateEditor({
   data,
   templateId,
+  duplicateId,
   onClose,
   run,
 }: {
   data: Data;
   templateId?: string;
+  duplicateId?: string;
   onClose: () => void;
   run: Run;
 }) {
@@ -31,17 +33,23 @@ export default function TemplateEditor({
     (t) => t.id === templateId,
   );
   const latest = activeTemplates(data.checklist_template_versions);
-  const initialUnit =
-    existing?.unit_id ?? (data.units.length === 1 ? data.units[0].id : '');
-  const initialKind = existing?.kind ?? 'cleaning';
-  const current = (unit: string, kind: string) =>
-    latest.find((t) => t.unit_id === unit && t.kind === kind);
-  const initial = current(initialUnit, initialKind);
-  const [unit, setUnit] = useState(initialUnit);
-  const [kind, setKind] = useState(initialKind);
-  const [baseId, setBaseId] = useState(initial?.id ?? null);
+  const duplicate = latest.find((t) => t.id === duplicateId);
+  const [unit, setUnit] = useState(
+    existing?.unit_id ??
+      (!duplicate && data.units.length === 1 ? data.units[0].id : ''),
+  );
+  const kind = existing?.kind ?? 'cleaning';
+  const baseId = existing?.id ?? null;
+  const [sourceId, setSourceId] = useState(duplicate?.id ?? '');
+  const [name, setName] = useState(
+    existing
+      ? templateName(existing)
+      : duplicate
+        ? `${templateName(duplicate)} (cópia)`
+        : '',
+  );
   const [items, setItems] = useState<Item[]>(
-    existing?.items ?? initial?.items ?? [],
+    existing?.items ?? (duplicate ? duplicateItems(duplicate.items) : []),
   );
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [uploading, setUploading] = useState(false);
@@ -50,18 +58,11 @@ export default function TemplateEditor({
   const selectedUnit = data.units.find((u) => u.id === unit);
   const counts = items.filter((i) => i.mode === 'count');
   const tasks = items.filter((i) => i.mode !== 'count');
-  const changeSource = (nextUnit: string, nextKind: string) => {
-    const next = current(nextUnit, nextKind);
-    const paired = current(
-      nextUnit,
-      nextKind === 'cleaning' ? 'inspection' : 'cleaning',
-    );
-    setUnit(nextUnit);
-    setKind(nextKind);
-    setBaseId(next?.id ?? null);
-    setItems(
-      next?.items ?? paired?.items.filter((i) => i.mode === 'count') ?? [],
-    );
+  const changeSource = (id: string) => {
+    const source = latest.find((t) => t.id === id);
+    setSourceId(id);
+    setName(source ? `${templateName(source)} (cópia)` : '');
+    setItems(source ? duplicateItems(source.items) : []);
     setError('');
   };
   const add = (mode: Item['mode']) =>
@@ -128,15 +129,44 @@ export default function TemplateEditor({
   };
   const save = async () => {
     setError('');
+    if (!name.trim()) {
+      setError('Dê um nome ao modelo.');
+      return;
+    }
     setSaving(true);
     await run(async () => {
       try {
-        await rpc('save_checklist', {
+        // Cada unidade mantém suas próprias fotos, inclusive após perder acesso à origem.
+        const copied = new Map<string, string>();
+        const publishedItems: Item[] = [];
+        for (const item of items) {
+          let path = item.reference_path;
+          if (path && !path.startsWith(`${unit}/`)) {
+            if (!supabase)
+              throw new Error(
+                'Configure o Supabase para copiar as referências.',
+              );
+            if (!copied.has(path)) {
+              const destination = `${unit}/${crypto.randomUUID()}`;
+              const { error } = await supabase.storage
+                .from('references')
+                .copy(path, destination);
+              if (error) throw error;
+              copied.set(path, destination);
+            }
+            path = copied.get(path)!;
+          }
+          publishedItems.push({ ...item, reference_path: path });
+        }
+        setItems(publishedItems);
+        await rpc('save_named_checklist', {
           payload: {
             unit_id: unit,
+            name: name.trim(),
             kind,
             base_template_id: baseId,
-            items: items.map((i) => ({
+            source_template_id: sourceId || null,
+            items: publishedItems.map((i) => ({
               ...i,
               title: i.title.trim(),
               room: i.room.trim() || 'Geral',
@@ -152,7 +182,7 @@ export default function TemplateEditor({
         );
         throw e;
       }
-    }, 'Checklist salvo. Os itens com quantidade foram atualizados no check-in e no checkout.');
+    }, 'Modelo salvo. O checkout será gerado a partir dos itens do check-in.');
     setSaving(false);
   };
   const options = (i: Item) => (
@@ -338,7 +368,11 @@ export default function TemplateEditor({
   return (
     <Modal
       title={
-        existing ? 'Editar modelo de checklist' : 'Novo modelo de checklist'
+        existing
+          ? 'Editar modelo de checklist'
+          : sourceId
+            ? 'Duplicar modelo de checklist'
+            : 'Novo modelo de checklist'
       }
       onClose={onClose}
       wide
@@ -370,16 +404,45 @@ export default function TemplateEditor({
         </p>
       )}
       {view === 'preview' ? (
-        <ChecklistPreview items={items} unit={selectedUnit} kind={kind} />
+        <ChecklistPreview
+          items={items}
+          unit={selectedUnit}
+          kind={kind}
+          name={name}
+        />
       ) : (
         <div className="form checklist-editor">
+          {!existing && (
+            <label className="field">
+              <span>Começar a partir de</span>
+              <select
+                value={sourceId}
+                disabled={saving}
+                onChange={(e) => changeSource(e.target.value)}
+              >
+                <option value="">Modelo em branco</option>
+                {latest.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {templateName(t)} ·{' '}
+                    {data.units.find((u) => u.id === t.unit_id)?.name}
+                  </option>
+                ))}
+              </select>
+              <small>
+                Duplique os itens, tarefas e referências de um modelo existente.
+              </small>
+            </label>
+          )}
           <div className="two-cols">
             <label className="field">
-              <span>Unidade</span>
+              <span>{sourceId ? 'Unidade de destino' : 'Unidade'}</span>
               <select
                 value={unit}
                 disabled={Boolean(existing) || saving}
-                onChange={(e) => changeSource(e.target.value, kind)}
+                onChange={(e) => {
+                  setUnit(e.target.value);
+                  setError('');
+                }}
               >
                 <option value="">Selecione</option>
                 {data.units.map((u) => (
@@ -390,17 +453,15 @@ export default function TemplateEditor({
               </select>
             </label>
             <label className="field">
-              <span>Checklist</span>
-              <select
-                value={kind}
-                disabled={Boolean(existing) || saving}
-                onChange={(e) => changeSource(unit, e.target.value)}
-              >
-                <option value="cleaning">{checklistLabel('cleaning')}</option>
-                <option value="inspection">
-                  {checklistLabel('inspection')}
-                </option>
-              </select>
+              <span>Nome do modelo</span>
+              <input
+                value={name}
+                required
+                maxLength={100}
+                disabled={saving}
+                placeholder="Ex.: Preparação completa do apartamento"
+                onChange={(e) => setName(e.target.value)}
+              />
             </label>
           </div>
           <p className="muted">
@@ -545,7 +606,9 @@ export default function TemplateEditor({
         <button
           type="button"
           className="button primary"
-          disabled={!unit || !items.length || uploading || saving}
+          disabled={
+            !unit || !name.trim() || !items.length || uploading || saving
+          }
           onClick={() => void save()}
         >
           {saving ? (
@@ -553,7 +616,11 @@ export default function TemplateEditor({
           ) : (
             <Check size={17} />
           )}
-          Salvar alterações
+          {existing
+            ? 'Salvar alterações'
+            : sourceId
+              ? 'Criar cópia'
+              : 'Criar modelo'}
         </button>
       </div>
     </Modal>

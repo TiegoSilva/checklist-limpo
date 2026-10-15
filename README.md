@@ -37,17 +37,17 @@ O responsável pela vistoria pode ser o mesmo da limpeza. O aprovador precisa se
 
 ### Variáveis
 
-| Variável | Onde | Uso |
-| --- | --- | --- |
-| `VITE_SUPABASE_URL` | frontend | URL pública do projeto |
-| `VITE_SUPABASE_ANON_KEY` | frontend | Chave pública anon, protegida por RLS |
-| `SUPABASE_URL` | servidor | Mesma URL |
-| `SUPABASE_ANON_KEY` | servidor | Autenticação do usuário e API com RLS |
-| `SUPABASE_SERVICE_ROLE_KEY` | **somente servidor** | Verificar os bytes de imagens e processar a fila push |
-| `VITE_VAPID_PUBLIC_KEY` | frontend, opcional | Assinatura push do navegador |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | servidor, opcionais | Entrega web push |
-| `VAPID_SUBJECT` | servidor, opcional | Contato `mailto:` ou URL da operação |
-| `CRON_SECRET` | servidor, opcional | Autenticar o consumidor da fila |
+| Variável                                | Onde                 | Uso                                                   |
+| --------------------------------------- | -------------------- | ----------------------------------------------------- |
+| `VITE_SUPABASE_URL`                     | frontend             | URL pública do projeto                                |
+| `VITE_SUPABASE_ANON_KEY`                | frontend             | Chave pública anon, protegida por RLS                 |
+| `SUPABASE_URL`                          | servidor             | Mesma URL                                             |
+| `SUPABASE_ANON_KEY`                     | servidor             | Autenticação do usuário e API com RLS                 |
+| `SUPABASE_SERVICE_ROLE_KEY`             | **somente servidor** | Verificar os bytes de imagens e processar a fila push |
+| `VITE_VAPID_PUBLIC_KEY`                 | frontend, opcional   | Assinatura push do navegador                          |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | servidor, opcionais  | Entrega web push                                      |
+| `VAPID_SUBJECT`                         | servidor, opcional   | Contato `mailto:` ou URL da operação                  |
+| `CRON_SECRET`                           | servidor, opcional   | Autenticar o consumidor da fila                       |
 
 Nunca use `VITE_` em chaves privadas. Nunca envie chaves por chat ou as versione. O build só injeta variáveis com prefixo `VITE_` no frontend. A chave service_role é obrigatória para confirmar fotografias pelo endpoint seguro; sem ela, a API retorna erro de configuração e nenhuma conclusão com foto obrigatória é liberada.
 
@@ -118,3 +118,5 @@ Com a migração `202610140007_work_orders.sql`, cada checklist é um **modelo**
 A interface prioriza celular, com checks circulares, itens e quantidades em linha e criação de ordens em quatro passos condicionais. A migração `202610150008_archive_checklists.sql` adiciona **remoção e restauração de modelos**, preservando o histórico e bloqueando novas execuções de modelos removidos. Veja [Interface mobile e remoção de modelos](docs/INTERFACE_MOBILE.md) para atualizar o Supabase.
 
 A migração `202610150009_checkin_execution_windows.sql` simplifica a programação: escolhe-se só o modelo de check-in; a saída é derivada dos seus itens com quantidade. As ordens guardam o check-in de origem e usam faixas padrão de 13:30–15:00 na entrada e 11:30–12:30 na saída. O gestor pode ajustar o horário do checkout no dia da execução, inclusive já iniciado e antes da revisão. Aplique a 009 depois da 008, antes de publicar este frontend.
+
+Modelos com nomes próprios e duplicação entre unidades: aplique uma vez `supabase/migrations/202610150010_named_checklist_models.sql` após a 009. Na criação de OS, escolha Check-in ou Tarefa; o modelo é escolhido dentro do Check-in. Consulte [Modelos e ordens](docs/MODELOS_E_ORDENS.md).

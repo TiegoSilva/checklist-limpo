@@ -3127,6 +3127,7 @@ input[type='checkbox']:disabled {
   color: #74706a;
 }
 .model-card-copy h3 {
+  overflow-wrap: anywhere;
   font-size: 1.2rem;
   color: #222;
   letter-spacing: -0.02em;

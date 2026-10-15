@@ -2255,3 +2255,311 @@ describe.sequential('checkout derivado, vínculos e janelas de execução', () =
     ).toHaveLength(0);
   });
 });
+
+describe.sequential('modelos nomeados e cópias independentes', () => {
+  let from: string,
+    to: string,
+    first: string,
+    other: string,
+    edited: string,
+    copied: string;
+  const publish = (payload: Record<string, unknown>) =>
+    rpc('save_named_checklist', [JSON.stringify(payload)]) as Promise<string>;
+  it('mantém vários modelos nomeados do mesmo tipo na mesma unidade', async () => {
+    await asUser(admin);
+    from = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Modelos origem',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    to = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Modelos destino',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    first = await publish({
+      unit_id: from,
+      name: '  Preparação completa  ',
+      items: [sharedCup, sharedTowel, item],
+    });
+    other = await publish({
+      unit_id: from,
+      name: 'Preparação rápida',
+      items: [sharedTowel],
+    });
+    const rows = (
+      await db.query<{ model_id: string; name: string }>(
+        'select model_id,name from checklist_template_versions where id in($1,$2)',
+        [first, other],
+      )
+    ).rows;
+    expect(new Set(rows.map((t) => t.model_id)).size).toBe(2);
+    expect(rows.map((t) => t.name)).toContain('Preparação completa');
+    await expect(
+      publish({ unit_id: from, name: 'PREPARAÇÃO COMPLETA', items: [item] }),
+    ).rejects.toThrow(/este nome/);
+    await expect(
+      publish({ unit_id: from, name: ' ', items: [item] }),
+    ).rejects.toThrow(/nome/);
+  });
+  it('edita e renomeia somente o modelo escolhido, sem mudar snapshots ou outro modelo', async () => {
+    edited = await publish({
+      unit_id: from,
+      name: 'Preparação completa revisada',
+      kind: 'cleaning',
+      base_template_id: first,
+      items: [{ ...sharedCup, expected: 8 }, sharedTowel, item],
+    });
+    const rows = (
+      await db.query<{
+        id: string;
+        model_id: string;
+        name: string;
+        items: { expected: number }[];
+      }>(
+        'select id,model_id,name,items from checklist_template_versions where id in($1,$2,$3)',
+        [first, edited, other],
+      )
+    ).rows;
+    expect(rows.find((t) => t.id === first)?.items[0].expected).toBe(4);
+    expect(rows.find((t) => t.id === edited)?.model_id).toBe(
+      rows.find((t) => t.id === first)?.model_id,
+    );
+    expect(rows.find((t) => t.id === other)?.name).toBe('Preparação rápida');
+    await expect(
+      publish({
+        unit_id: from,
+        name: 'Edição atrasada',
+        base_template_id: first,
+        items: [item],
+      }),
+    ).rejects.toThrow(/CONFLICT/);
+    await expect(
+      publish({
+        unit_id: to,
+        name: 'Base de outra unidade',
+        base_template_id: edited,
+        items: [item],
+      }),
+    ).rejects.toThrow(/incompatível/);
+  });
+  it('duplica para uma unidade que já tem modelo, sem sobrescrever o destino ou a origem', async () => {
+    const destination = await publish({
+      unit_id: to,
+      name: 'Modelo já existente',
+      items: [item],
+    });
+    const source = (
+      await db.query<{ items: unknown[] }>(
+        'select items from checklist_template_versions where id=$1',
+        [edited],
+      )
+    ).rows[0];
+    copied = await publish({
+      unit_id: to,
+      name: 'Preparação completa',
+      source_template_id: edited,
+      items: source.items,
+    });
+    const models = (
+      await db.query<{
+        id: string;
+        model_id: string;
+        unit_id: string;
+        items: unknown[];
+      }>(
+        'select id,model_id,unit_id,items from checklist_template_versions where id in($1,$2,$3)',
+        [copied, edited, destination],
+      )
+    ).rows;
+    expect(models.find((t) => t.id === copied)?.items).toEqual(source.items);
+    expect(models.find((t) => t.id === copied)?.model_id).not.toBe(
+      models.find((t) => t.id === edited)?.model_id,
+    );
+    expect(models.find((t) => t.id === copied)?.unit_id).toBe(to);
+    expect(models.find((t) => t.id === destination)?.items).toEqual([item]);
+    expect(
+      (
+        await db.query(
+          'select id from audit_events where resource_id=$1 and event=$2',
+          [copied, 'checklist.duplicated'],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    await publish({
+      unit_id: to,
+      name: 'Cópia ajustada',
+      base_template_id: copied,
+      items: [{ ...sharedCup, expected: 1 }],
+    });
+    expect(
+      (
+        await db.query<{ items: { expected: number }[] }>(
+          'select items from checklist_template_versions where id=$1',
+          [edited],
+        )
+      ).rows[0].items[0].expected,
+    ).toBe(8);
+  });
+  it('aplica permissões nas duas unidades e exige fotos no destino', async () => {
+    await asUser(worker);
+    await expect(
+      publish({
+        unit_id: to,
+        name: 'Sem permissão',
+        source_template_id: edited,
+        items: [item],
+      }),
+    ).rejects.toThrow(/Acesso negado/);
+    const foreignUser = '00000000-0000-4000-8000-000000000099';
+    await db.exec(
+      `reset role; insert into auth.users values('${foreignUser}','external-models@aja.test');`,
+    );
+    await asUser(foreignUser);
+    const foreignOrg = (await rpc('bootstrap', [
+      'Outro grupo modelos',
+      'Externo',
+    ])) as string;
+    const foreignProperty = (await rpc('configure', [
+      'property',
+      JSON.stringify({
+        org_id: foreignOrg,
+        name: 'Propriedade externa modelos',
+      }),
+    ])) as string;
+    const foreignUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: foreignProperty,
+        name: 'Unidade externa modelos',
+        capacity: 2,
+        base_occupancy: 1,
+      }),
+    ])) as string;
+    const foreignModel = await publish({
+      unit_id: foreignUnit,
+      name: 'Modelo restrito',
+      items: [item],
+    });
+    await asUser(admin);
+    await expect(
+      publish({
+        unit_id: to,
+        name: 'Origem restrita',
+        source_template_id: foreignModel,
+        items: [item],
+      }),
+    ).rejects.toThrow(/Acesso negado ao modelo de origem/);
+    await expect(
+      publish({
+        unit_id: to,
+        name: 'Foto estrangeira',
+        source_template_id: edited,
+        items: [{ ...item, reference_path: `${from}/foto` }],
+      }),
+    ).rejects.toThrow(/Copie as fotos/);
+    const withPhoto = await publish({
+      unit_id: to,
+      name: 'Fotos próprias',
+      source_template_id: edited,
+      items: [{ ...item, reference_path: `${to}/foto-copiada` }],
+    });
+    expect(withPhoto).toBeTruthy();
+  });
+  it('remove todas as versões de um modelo sem remover os outros e permite restaurar', async () => {
+    await asUser(admin);
+    await rpc('set_checklist_archived', [edited, true]);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where id in($1,$2) and archived_at is not null',
+          [first, edited],
+        )
+      ).rows,
+    ).toHaveLength(2);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where id in($1,$2) and archived_at is null',
+          [other, copied],
+        )
+      ).rows,
+    ).toHaveLength(2);
+    await expect(
+      publish({
+        unit_id: from,
+        name: 'Edição de removido',
+        base_template_id: edited,
+        items: [item],
+      }),
+    ).rejects.toThrow(/removido/);
+    await expect(
+      publish({
+        unit_id: to,
+        name: 'Cópia removida',
+        source_template_id: edited,
+        items: [item],
+      }),
+    ).rejects.toThrow(/origem foi removido/);
+    await rpc('set_checklist_archived', [edited, false]);
+    await expect(rpc('set_checklist_archived', [first, true])).rejects.toThrow(
+      /CONFLICT/,
+    );
+  });
+  it('usa o modelo nomeado escolhido para gerar as duas ordens e preserva seu snapshot após edição', async () => {
+    await asUser(admin);
+    const incoming = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: from,
+        order_type: 'checkin',
+        execution_mode: 'checklist',
+        template_id: edited,
+        assignee: admin,
+        checkout_assignee: admin,
+        guest_name: 'Estadia modelo nomeado',
+        checkin: '2098-07-01',
+        duration_nights: 2,
+        guests: 3,
+      }),
+    ])) as string;
+    const orders = (
+      await db.query<{
+        template_id: string;
+        order_type: string;
+        items: { mode: string; expected: number }[];
+      }>(
+        'select s.template_id,s.order_type,a.items from service_orders s join activities a on a.id=s.activity_id where s.checkin_order_id=$1',
+        [incoming],
+      )
+    ).rows;
+    expect(orders).toHaveLength(2);
+    expect(orders.every((o) => o.template_id === edited)).toBe(true);
+    expect(
+      orders
+        .find((o) => o.order_type === 'checkout')
+        ?.items.map((i) => i.expected),
+    ).toEqual([8, 3]);
+    await publish({
+      unit_id: from,
+      name: 'Preparação alterada depois',
+      base_template_id: edited,
+      items: [sharedCup],
+    });
+    expect(
+      (
+        await db.query<{ items: { expected: number }[] }>(
+          'select a.items from activities a join service_orders s on s.activity_id=a.id where s.checkin_order_id=$1 and s.order_type=$2',
+          [incoming, 'checkout'],
+        )
+      ).rows[0].items[0].expected,
+    ).toBe(8);
+  });
+});

@@ -460,7 +460,7 @@ function Portal({ session }: { session: Session }) {
             ? 'Checklist de um modelo'
             : 'Tarefa simples'}
           {s.template_id
-            ? ` · v${data.checklist_template_versions.find((t) => t.id === s.template_id)?.version ?? '—'}`
+            ? ` · ${data.checklist_template_versions.find((t) => t.id === s.template_id)?.name ?? 'Modelo'} · v${data.checklist_template_versions.find((t) => t.id === s.template_id)?.version ?? '—'}`
             : ''}
           {s.checkin_order_id || s.parent_order_id
             ? ` · Check-in #${(s.checkin_order_id || s.parent_order_id)!.slice(0, 8)}`
@@ -1269,6 +1269,10 @@ function Portal({ session }: { session: Session }) {
               run={run}
               data={data}
               onCreate={() => open('template')}
+              onDuplicate={(id) => {
+                setSelectedUnit(id);
+                setModal('duplicate-template');
+              }}
               onEdit={(id) => {
                 setSelectedUnit(id);
                 setModal('view-template');
@@ -1724,11 +1728,16 @@ function Portal({ session }: { session: Session }) {
             />
           ) : null;
         })()}
-      {(modal === 'template' || modal === 'view-template') && (
+      {['template', 'view-template', 'duplicate-template'].includes(
+        modal ?? '',
+      ) && (
         <TemplateEditor
           key={modal + selectedUnit}
           data={data}
           templateId={modal === 'view-template' ? selectedUnit : undefined}
+          duplicateId={
+            modal === 'duplicate-template' ? selectedUnit : undefined
+          }
           onClose={() => setModal(null)}
           run={run}
         />

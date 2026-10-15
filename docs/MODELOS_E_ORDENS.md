@@ -7,17 +7,19 @@ Um **modelo de checklist** é a configuração reutilizável de itens, tarefas, 
 - **Checklist:** utiliza a versão escolhida de um modelo, copiada para a execução. Editar o modelo depois não altera essa ordem nem suas respostas.
 - **Tarefa simples:** tem título e instruções, descrição do trabalho realizado, evidência fotográfica e revisão do gestor.
 
-Os modelos atuais são configurados por unidade para check-in e checkout. Seus itens com quantidade permanecem compartilhados, conforme a migração 005. Também podem ser escolhidos para outras ordens da mesma unidade. Os modelos não executam operações por si mesmos.
+Cada unidade pode ter vários modelos com nomes próprios. Em **Novo modelo**, informe um nome livre, como “Preparação rápida” ou “Preparação completa”, e cadastre os itens e tarefas. Ao editar, somente esse modelo recebe uma nova versão; ordens existentes continuam com a versão escolhida. Os modelos antigos mantêm seus nomes iniciais e podem ser renomeados.
+
+Para copiar, use **Duplicar** no cartão ou **Começar a partir de** na criação. Escolha a **Unidade de destino**, ajuste o nome e os itens e salve. A cópia tem identidade e histórico próprios, preserva quantidades, regras, tarefas e fotos, e não substitui modelos do destino. As referências fotográficas são copiadas para o Storage da unidade de destino antes da publicação; é necessário acesso de gestão às duas unidades. Novos modelos alimentam o check-in; o checkout é derivado automaticamente dos itens de quantidade do modelo escolhido.
 
 ## Hospedagem
 
-Em **Nova ordem de serviço**, o formulário segue quatro passos: **Tipo → Detalhes → Programação → Revisão**. Escolha **Check-in**, **Tarefa** ou **Checklist**. Os campos mudam conforme a escolha; voltar a um passo mantém os dados preenchidos enquanto o formulário estiver aberto.
+Em **Nova ordem de serviço**, o formulário segue quatro passos: **Tipo → Detalhes → Programação → Revisão**. Escolha **Check-in** ou **Tarefa**. Os campos mudam conforme a escolha; voltar a um passo mantém os dados preenchidos enquanto o formulário estiver aberto.
 
 Para **Check-in** (opção selecionada por padrão), informe unidade, hóspede, entrada, diárias e quantidade de hóspedes. A saída é calculada automaticamente: entrada + diárias. Em Programação, escolha os responsáveis e **somente o modelo de check-in**. A conferência de checkout é gerada com os itens de quantidade da mesma versão escolhida, usando a ocupação da estadia. As tarefas exclusivas de limpeza ficam na entrada. Sem itens de quantidade aplicáveis, o checkout usa tarefa simples.
 
 As faixas padrão são **13:30–15:00** para check-in e **11:30–12:30** para checkout, no fuso de São Paulo. Ambas podem ser alteradas ao criar. O início aparece na programação e o fim é o prazo da ordem. Confira o resumo e use **Criar as duas ordens**.
 
-Para **Tarefa**, informe a unidade e o trabalho a realizar, depois responsável e prazo. Instruções, prioridade, bloqueio da unidade e vínculo com ocorrência ficam nas opções adicionais. Para **Checklist**, selecione o modelo ativo e a ocupação; o título é gerado a partir do modelo, sem pedir a mesma informação novamente.
+Para **Tarefa**, informe a unidade e o trabalho a realizar, depois responsável e prazo. Instruções, prioridade, bloqueio da unidade e vínculo com ocorrência ficam nas opções adicionais.
 
 Uma única transação cria a hospedagem e **duas ordens vinculadas**:
 
@@ -45,3 +47,5 @@ Para remover e restaurar modelos, aplique também a migração 008 e consulte [a
 Não foi aplicada migração no projeto remoto nesta entrega. A integração real com Supabase Auth, Storage, Realtime e Vercel depende da configuração externa. Os testes locais executam as funções e políticas reais em PostgreSQL e verificam os dois formatos, os vínculos, as quantidades, as versões, os cálculos de calendário, a revisão e a edição da saída após concluir o check-in.
 
 A migração `202610150009_checkin_execution_windows.sql` ativa as faixas de execução, o checkout derivado e o vínculo de ordens adicionais. Aplique uma vez depois da 008. Ordens anteriores mantêm suas listas e seus prazos; a migração não reescreve execuções históricas.
+
+A migração `202610150010_named_checklist_models.sql` permite vários modelos nomeados por unidade e cópias independentes. Execute uma vez após a 009, antes de usar o novo editor. Nenhuma migração remota foi aplicada automaticamente.

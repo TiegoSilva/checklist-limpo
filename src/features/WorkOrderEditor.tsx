@@ -4,7 +4,6 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
-  ClipboardList,
   House,
   LoaderCircle,
   Wrench,
@@ -13,7 +12,7 @@ import { Modal } from '../components';
 import { dayKey, type Data } from '../domain';
 import { rpc, type Run } from '../lib/client';
 import QuantityStepper from './QuantityStepper';
-import { activeTemplates, checklistLabel } from './checklists';
+import { activeTemplates, templateName } from './checklists';
 
 export function departureDate(arrival: string, nights: number) {
   if (
@@ -33,7 +32,7 @@ export const validTimeWindow = (start: string, end: string) =>
   start < end;
 type Mode = 'task' | 'checklist';
 export type OrderDraft = {
-  intent: 'checkin' | 'task' | 'checklist';
+  intent: 'checkin' | 'task';
   unit: string;
   title: string;
   description: string;
@@ -116,13 +115,11 @@ export function orderPlan(data: Data, d: OrderDraft) {
   const mode: Mode =
     d.intent === 'task'
       ? 'task'
-      : d.intent === 'checklist'
-        ? 'checklist'
-        : d.checkinMode === 'auto'
-          ? model
-            ? 'checklist'
-            : 'task'
-          : d.checkinMode;
+      : d.checkinMode === 'auto'
+        ? model
+          ? 'checklist'
+          : 'task'
+        : d.checkinMode;
   const outMode: Mode =
     mode === 'checklist' &&
     model?.items.some(
@@ -156,11 +153,6 @@ export function orderStepError(
         return `A unidade recebe até ${unit.capacity} hóspedes.`;
     } else if (d.intent === 'task' && !d.title.trim())
       return 'Descreva a tarefa que precisa ser feita.';
-    else if (
-      d.intent === 'checklist' &&
-      (!plan.model || d.occupancy < 1 || d.occupancy > unit.capacity)
-    )
-      return 'Escolha um modelo ativo e uma ocupação válida.';
   }
   if (step === 2) {
     if (
@@ -219,10 +211,7 @@ export function buildOrderPayload(data: Data, d: OrderDraft, id: string) {
         }
       : {
           checkin_order_id: d.checkinOrder || null,
-          title:
-            d.intent === 'checklist'
-              ? `Checklist · ${checklistLabel(plan.model!.kind)}`
-              : d.title.trim(),
+          title: d.title.trim(),
           due_at: new Date(d.due).toISOString(),
           occupancy: d.occupancy,
           priority: d.priority,
@@ -328,33 +317,9 @@ export default function WorkOrderEditor({
       </label>
     );
   };
-  const modelField = () => (
-    <label className="field">
-      <span>{stay ? 'Modelo de check-in' : 'Modelo de checklist'}</span>
-      <select
-        required
-        value={plan.model?.id ?? ''}
-        onChange={(e) => patch({ model: e.target.value })}
-      >
-        <option value="">Escolha um modelo</option>
-        {plan.incoming.map((t) => (
-          <option key={t.id} value={t.id}>
-            {checklistLabel(t.kind)} · v{t.version}
-          </option>
-        ))}
-      </select>
-      {!plan.incoming.length && (
-        <small>Nenhum modelo ativo para esta unidade.</small>
-      )}
-    </label>
-  );
   const titles = [
     'O que vamos organizar?',
-    stay
-      ? 'Conte sobre a estadia'
-      : draft.intent === 'task'
-        ? 'O que precisa ser feito?'
-        : 'Escolha o checklist',
+    stay ? 'Conte sobre a estadia' : 'O que precisa ser feito?',
     stay ? 'Quem cuida de cada etapa?' : 'Quem faz e para quando?',
     'Tudo pronto para criar?',
   ];
@@ -470,12 +435,6 @@ export default function WorkOrderEditor({
                   text: 'Um serviço ou cuidado específico.',
                   Icon: Wrench,
                 },
-                {
-                  id: 'checklist' as const,
-                  label: 'Checklist',
-                  text: 'Execute um modelo que já está pronto.',
-                  Icon: ClipboardList,
-                },
               ].map(({ id, label, text, Icon }) => (
                 <label
                   className={`order-choice ${draft.intent === id ? 'selected' : ''}`}
@@ -535,45 +494,27 @@ export default function WorkOrderEditor({
                   ))}
                 </select>
               </label>
-              {draft.intent === 'checklist' ? (
-                <>
-                  {modelField()}
-                  <div className="number-setting">
-                    <div>
-                      <strong>Ocupação</strong>
-                      <small>Usada nas quantidades do modelo</small>
-                    </div>
-                    <QuantityStepper
-                      label="Ocupação do checklist"
-                      min={1}
-                      max={unit?.capacity ?? 9999}
-                      value={draft.occupancy}
-                      onChange={(occupancy) => patch({ occupancy })}
-                    />
-                  </div>
-                </>
-              ) : (
-                <label className="field">
-                  <span>{stay ? 'Nome do hóspede' : 'Qual é a tarefa?'}</span>
-                  {stay ? (
-                    <input
-                      required
-                      autoComplete="off"
-                      value={draft.title}
-                      onChange={(e) => patch({ title: e.target.value })}
-                      placeholder="Nome da reserva"
-                    />
-                  ) : (
-                    <textarea
-                      required
-                      rows={2}
-                      value={draft.title}
-                      onChange={(e) => patch({ title: e.target.value })}
-                      placeholder="Ex.: trocar a lâmpada da cozinha"
-                    />
-                  )}
-                </label>
-              )}
+              <label className="field">
+                <span>{stay ? 'Nome do hóspede' : 'Qual é a tarefa?'}</span>
+                {stay ? (
+                  <input
+                    required
+                    autoComplete="off"
+                    value={draft.title}
+                    onChange={(e) => patch({ title: e.target.value })}
+                    placeholder="Nome da reserva"
+                  />
+                ) : (
+                  <textarea
+                    required
+                    rows={2}
+                    value={draft.title}
+                    onChange={(e) => patch({ title: e.target.value })}
+                    placeholder="Ex.: trocar a lâmpada da cozinha"
+                  />
+                )}
+              </label>
+
               {stay && (
                 <>
                   <label className="field">
@@ -698,7 +639,7 @@ export default function WorkOrderEditor({
                       <option value="task">Tarefa simples (sem modelo)</option>
                       {plan.incoming.map((t) => (
                         <option key={t.id} value={t.id}>
-                          {checklistLabel(t.kind)} · v{t.version}
+                          {templateName(t)}
                         </option>
                       ))}
                     </select>
@@ -844,22 +785,10 @@ export default function WorkOrderEditor({
             <div className="order-review">
               <div className="review-kind">
                 <span className="review-icon">
-                  {stay ? (
-                    <House />
-                  ) : draft.intent === 'task' ? (
-                    <Wrench />
-                  ) : (
-                    <ClipboardList />
-                  )}
+                  {stay ? <House /> : <Wrench />}
                 </span>
                 <div>
-                  <small>
-                    {stay
-                      ? 'Check-in + checkout'
-                      : draft.intent === 'task'
-                        ? 'Tarefa'
-                        : 'Checklist'}
-                  </small>
+                  <small>{stay ? 'Check-in + checkout' : 'Tarefa'}</small>
                   <h3>{unit?.name}</h3>
                 </div>
               </div>
@@ -882,12 +811,8 @@ export default function WorkOrderEditor({
                   </>
                 ) : (
                   <div>
-                    <dt>{draft.intent === 'task' ? 'Tarefa' : 'Modelo'}</dt>
-                    <dd>
-                      {draft.intent === 'task'
-                        ? draft.title
-                        : `${checklistLabel(plan.model?.kind ?? '')} · v${plan.model?.version}`}
-                    </dd>
+                    <dt>Tarefa</dt>
+                    <dd>{draft.title}</dd>
                   </div>
                 )}
                 <div>
@@ -898,7 +823,9 @@ export default function WorkOrderEditor({
                       <small>
                         {draft.checkinTime}–{draft.checkinEndTime} ·{' '}
                         {plan.mode === 'checklist'
-                          ? `Checklist v${plan.model?.version}`
+                          ? plan.model
+                            ? templateName(plan.model)
+                            : 'Checklist'
                           : 'Tarefa simples'}
                       </small>
                     )}

@@ -142,7 +142,8 @@ export default function ActivityDetail({
     >
       {order && (
         <p className="info-card">
-          Ordem de serviço · Modelo v{model?.version ?? '—'}
+          Ordem de serviço · {model?.name || 'Modelo'} · v
+          {model?.version ?? '—'}
           {booking
             ? ` · ${booking.guests} hóspedes · ${booking.duration_nights} diária(s) · Saída ${booking.checkout}`
             : ''}
