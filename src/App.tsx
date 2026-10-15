@@ -56,7 +56,9 @@ import ChecklistPreviewDialog from './features/ChecklistPreview';
 import InventoryEditor from './features/InventoryEditor';
 import StayAgenda from './features/StayAgenda';
 import WorkOrderEditor from './features/WorkOrderEditor';
-import { serviceWindow } from './features/OrderStayContext';
+import TodayStayOrders from './features/TodayStayOrders';
+import WorkOrderCard from './features/WorkOrderCard';
+import { pendingApprovals } from './features/operation';
 import { DeletedOrders } from './features/OrderManagement';
 
 const navigation = [
@@ -303,9 +305,6 @@ function Portal({ session }: { session: Session }) {
   };
   const daily = visible.filter(inPeriod);
   const myActivities = daily.filter((a) => a.assignee === user);
-  const approvals = visible.filter(
-    (a) => a.status === 'review' && a.assignee !== user,
-  );
   const taskOrders = data.service_orders.filter(
     (s) =>
       !s.deleted_at &&
@@ -317,8 +316,9 @@ function Portal({ session }: { session: Session }) {
         .includes(search.toLowerCase()),
   );
   const dailyTasks = taskOrders.filter(inPeriod);
-  const taskApprovals = taskOrders.filter(
-    (s) => s.status === 'review' && s.assignee !== user,
+  const { activities: approvals, tasks: taskApprovals } = pendingApprovals(
+    visible,
+    taskOrders,
   );
   const active = selected
     ? data.activities.find((a) => a.id === selected)
@@ -354,7 +354,7 @@ function Portal({ session }: { session: Session }) {
       : path === '/meu-dia'
         ? 'Meu dia'
         : path === '/aprovacoes'
-          ? 'Aguardando minha aprovação'
+          ? 'Aguardando aprovação'
           : path === '/notificacoes'
             ? 'Notificações'
             : path === '/perfil'
@@ -425,7 +425,9 @@ function Portal({ session }: { session: Session }) {
         )}
         <button className="text-button" onClick={() => setSelected(a.id)}>
           {a.status === 'review'
-            ? 'Revisar'
+            ? a.assignee === user
+              ? 'Ver envio'
+              : 'Revisar'
             : a.status === 'pending'
               ? 'Iniciar atividade'
               : isDone(a)
@@ -437,44 +439,12 @@ function Portal({ session }: { session: Session }) {
     </article>
   );
 
+  const openOrder = (s: Service) => {
+    if (s.activity_id) setSelected(s.activity_id);
+    else setService(s);
+  };
   const orderCard = (s: Service) => (
-    <button
-      className="service-row"
-      key={s.id}
-      onClick={() =>
-        s.activity_id ? setSelected(s.activity_id) : setService(s)
-      }
-    >
-      <span className="section-icon">
-        {s.execution_mode === 'checklist' ? (
-          <ClipboardList size={20} />
-        ) : (
-          <Wrench size={20} />
-        )}
-      </span>
-      <div>
-        <strong>{s.title}</strong>
-        <small>
-          {unitName(s.unit_id)} · {person(s.assignee)} · {serviceWindow(s)}
-        </small>
-        <small>
-          {s.execution_mode === 'checklist'
-            ? 'Checklist de um modelo'
-            : 'Tarefa simples'}
-          {s.template_id
-            ? ` · ${data.checklist_template_versions.find((t) => t.id === s.template_id)?.name ?? 'Modelo'} · v${data.checklist_template_versions.find((t) => t.id === s.template_id)?.version ?? '—'}`
-            : ''}
-          {s.checkin_order_id || s.parent_order_id
-            ? ` · Check-in #${(s.checkin_order_id || s.parent_order_id)!.slice(0, 8)}`
-            : ''}
-        </small>
-        {s.blocking && (
-          <small className="error-text">Impede a liberação da unidade</small>
-        )}
-      </div>
-      <Badge status={s.status} />
-      <ChevronRight size={17} />
-    </button>
+    <WorkOrderCard key={s.id} order={s} data={data} onOpen={openOrder} />
   );
   const executionList = (activities: Activity[], tasks: Service[]) =>
     [...activities, ...tasks]
@@ -517,7 +487,7 @@ function Portal({ session }: { session: Session }) {
         <span className="nav-caption">OPERAÇÃO</span>
         <nav aria-label="Navegação principal">
           {navigation
-            .filter((n) => manager || !['/', '/aprovacoes'].includes(n.path))
+            .filter((n) => manager || n.path !== '/')
             .map((n) => (
               <NavLink
                 key={n.path}
@@ -760,6 +730,12 @@ function Portal({ session }: { session: Session }) {
           )}
           {path === '/' && (
             <>
+              <TodayStayOrders
+                data={data}
+                property={property}
+                search={search}
+                onOpen={openOrder}
+              />
               <section className="stats" aria-label="Indicadores da operação">
                 {[
                   {
@@ -780,7 +756,7 @@ function Portal({ session }: { session: Session }) {
                     title: 'Aguardando aprovação',
                     value: counts.review,
                     icon: ClipboardCheck,
-                    note: 'Precisam do seu olhar',
+                    note: 'Conferência final das ordens',
                     color: 'orange',
                   },
                   {
@@ -821,13 +797,13 @@ function Portal({ session }: { session: Session }) {
                         </span>
                         <div>
                           <h2>
-                            Aguardando minha aprovação{' '}
+                            Aguardando aprovação{' '}
                             <span className="count-pill">
                               {approvals.length + taskApprovals.length}
                             </span>
                           </h2>
                           <p>
-                            A última conferência para uma estadia impecável.
+                            Acompanhe os envios da equipe, inclusive os seus.
                           </p>
                         </div>
                       </div>
@@ -1180,7 +1156,7 @@ function Portal({ session }: { session: Session }) {
             </div>
           )}
           {path === '/servicos' && (
-            <section className="panel">
+            <section className="panel orders-panel">
               <div className="section-heading">
                 <h2>Ordens de serviço</h2>
                 <span className="count-pill">

@@ -56,8 +56,6 @@ export default function TemplateEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const selectedUnit = data.units.find((u) => u.id === unit);
-  const counts = items.filter((i) => i.mode === 'count');
-  const tasks = items.filter((i) => i.mode !== 'count');
   const changeSource = (id: string) => {
     const source = latest.find((t) => t.id === id);
     setSourceId(id);
@@ -82,15 +80,9 @@ export default function TemplateEditor({
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   const move = (id: string, direction: number) =>
     setItems((prev) => {
-      const selected = prev.find((i) => i.id === id)!;
-      const siblings = prev.filter(
-        (i) => (i.mode === 'count') === (selected.mode === 'count'),
-      );
-      const siblingIndex = siblings.findIndex((i) => i.id === id);
-      const next = siblings[siblingIndex + direction];
-      if (!next) return prev;
       const index = prev.findIndex((i) => i.id === id);
-      const position = prev.findIndex((i) => i.id === next.id);
+      const position = index + direction;
+      if (index < 0 || position < 0 || position >= prev.length) return prev;
       const result = [...prev];
       [result[index], result[position]] = [result[position], result[index]];
       return result;
@@ -189,6 +181,26 @@ export default function TemplateEditor({
     <details className="item-options">
       <summary>Opções</summary>
       <div className="item-options-body">
+        <label className="field">
+          <span>Tipo de conferência</span>
+          <select
+            value={i.mode}
+            onChange={(e) =>
+              update(i.id, {
+                mode: e.target.value as Item['mode'],
+                ...(e.target.value === 'count'
+                  ? { expected: i.expected ?? 1 }
+                  : {}),
+              })
+            }
+          >
+            <option value="count">Item com quantidade</option>
+            <option value="task">Tarefa — concluído ou pendente</option>
+            <option value="technical">
+              Conferência — conforme ou não conforme
+            </option>
+          </select>
+        </label>
         <label className="field">
           <span>Ambiente</span>
           <input
@@ -338,11 +350,7 @@ export default function TemplateEditor({
           <button
             className="button secondary"
             type="button"
-            disabled={
-              items.filter(
-                (x) => (x.mode === 'count') === (i.mode === 'count'),
-              )[0]?.id === i.id
-            }
+            disabled={items[0]?.id === i.id}
             onClick={() => move(i.id, -1)}
           >
             <ArrowUp size={15} />
@@ -351,11 +359,7 @@ export default function TemplateEditor({
           <button
             className="button secondary"
             type="button"
-            disabled={
-              items
-                .filter((x) => (x.mode === 'count') === (i.mode === 'count'))
-                .at(-1)?.id === i.id
-            }
+            disabled={items.at(-1)?.id === i.id}
             onClick={() => move(i.id, 1)}
           >
             <ArrowDown size={15} />
@@ -473,10 +477,11 @@ export default function TemplateEditor({
           <section className="editor-section">
             <div className="editor-section-heading">
               <div>
-                <h3>Itens e quantidades</h3>
+                <h3>Itens do checklist</h3>
                 <p>
-                  Cadastre uma vez. Os mesmos itens e padrões ficam disponíveis
-                  no check-in e no checkout.
+                  Adicione todos os itens nesta lista. Em Opções, escolha
+                  quantidade, tarefa ou conferência. O checkout reutiliza os
+                  itens com quantidade.
                 </p>
               </div>
               <button
@@ -488,7 +493,7 @@ export default function TemplateEditor({
                 Importar inventário
               </button>
             </div>
-            {counts.map((i, index) => (
+            {items.map((i, index) => (
               <div className="compact-item" key={i.id}>
                 <input
                   aria-label={`Nome do item ${index + 1}`}
@@ -496,23 +501,29 @@ export default function TemplateEditor({
                   placeholder="Nome do item"
                   onChange={(e) => update(i.id, { title: e.target.value })}
                 />
-                <div className="compact-quantity">
-                  <QuantityStepper
-                    label={`Quantidade de ${i.title || `item ${index + 1}`}`}
-                    value={i.quantity_per_guest ?? i.expected ?? 0}
-                    onChange={(n) =>
-                      update(
-                        i.id,
-                        i.quantity_per_guest === undefined
-                          ? { expected: n }
-                          : { quantity_per_guest: n },
-                      )
-                    }
-                  />
-                  {i.quantity_per_guest !== undefined && (
-                    <small>/hóspede</small>
-                  )}
-                </div>
+                {i.mode === 'count' ? (
+                  <div className="compact-quantity">
+                    <QuantityStepper
+                      label={`Quantidade de ${i.title || `item ${index + 1}`}`}
+                      value={i.quantity_per_guest ?? i.expected ?? 0}
+                      onChange={(n) =>
+                        update(
+                          i.id,
+                          i.quantity_per_guest === undefined
+                            ? { expected: n }
+                            : { quantity_per_guest: n },
+                        )
+                      }
+                    />
+                    {i.quantity_per_guest !== undefined && (
+                      <small>/hóspede</small>
+                    )}
+                  </div>
+                ) : (
+                  <span className="compact-item-type">
+                    {i.mode === 'task' ? 'Tarefa' : 'Conferência'}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="icon-button danger-text"
@@ -526,7 +537,7 @@ export default function TemplateEditor({
                 {options(i)}
               </div>
             ))}
-            {!counts.length && (
+            {!items.length && (
               <p className="editor-empty">
                 Adicione o nome de um item e escolha a quantidade.
               </p>
@@ -538,66 +549,6 @@ export default function TemplateEditor({
             >
               <Plus size={17} />
               Adicionar item
-            </button>
-          </section>
-          <section className="editor-section">
-            <div className="editor-section-heading">
-              <div>
-                <h3>
-                  {kind === 'cleaning'
-                    ? 'Tarefas de limpeza e conferência'
-                    : 'Conferências adicionais de checkout'}
-                </h3>
-                <p>Estas tarefas pertencem somente a este checklist.</p>
-              </div>
-            </div>
-            {tasks.map((i) => (
-              <fieldset className="simple-item" key={i.id}>
-                <legend>Tarefa</legend>
-                <div className="simple-item-main">
-                  <label className="field">
-                    <span>O que precisa ser feito?</span>
-                    <input
-                      value={i.title}
-                      placeholder="Ex.: limpar o banheiro"
-                      onChange={(e) => update(i.id, { title: e.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Resposta</span>
-                    <select
-                      value={i.mode}
-                      onChange={(e) =>
-                        update(i.id, {
-                          mode: e.target.value as 'task' | 'technical',
-                        })
-                      }
-                    >
-                      <option value="task">Concluído / pendente</option>
-                      <option value="technical">Conforme / não conforme</option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="icon-button danger-text"
-                    aria-label={`Remover tarefa ${i.title}`}
-                    onClick={() =>
-                      setItems((prev) => prev.filter((x) => x.id !== i.id))
-                    }
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-                {options(i)}
-              </fieldset>
-            ))}
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => add(kind === 'cleaning' ? 'task' : 'technical')}
-            >
-              <Plus size={17} />
-              Adicionar tarefa
             </button>
           </section>
         </div>
