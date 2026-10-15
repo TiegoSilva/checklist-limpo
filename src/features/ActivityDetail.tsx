@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
+  Users,
+  Moon,
   House,
   AlertTriangle,
   Save,
@@ -16,10 +18,10 @@ import OrderManagement from './OrderManagement';
 import ExecutionSummary from './ExecutionSummary';
 import {
   executionResponses,
+  executionIssue,
   itemResponse,
   updateItemResponse,
   sendExecution,
-  MAX_EXECUTION_PHOTOS,
 } from './execution';
 import ExecutionPhotos from './ExecutionPhotos';
 import {
@@ -92,6 +94,9 @@ export default function ActivityDetail({
   const [draftReady, setDraftReady] = useState(false);
   const [draftRevision, setDraftRevision] = useState(a.revision);
   const dirty = useRef(false);
+  const [validation, setValidation] =
+    useState<ReturnType<typeof executionIssue>>(null);
+  const itemNodes = useRef(new Map<string, HTMLDivElement>());
   const [feedback, setFeedback] = useState<ModalFeedback | null>(null);
   const [draft, setDraft] = useState<Draft>();
   const [sync, setSync] = useState('Confirmado pelo servidor');
@@ -107,7 +112,7 @@ export default function ActivityDetail({
     ['in_progress', 'correction'].includes(a.status) &&
     !submitted;
   const pending = a.status === 'pending' && a.assignee === user;
-  const reviewing = a.status === 'review' && manager && a.assignee !== user;
+  const reviewing = a.status === 'review' && manager;
   const makeDraft = (): Draft => ({
     revision: draftRevision,
     responses,
@@ -119,6 +124,7 @@ export default function ActivityDetail({
   const persist = async (d: Draft) => {
     await saveDraft(user, a.id, d);
     setDraft(d);
+    setSync('Rascunho salvo automaticamente');
   };
   useEffect(() => {
     let active = true;
@@ -180,6 +186,7 @@ export default function ActivityDetail({
     }
   }, [a.revision, a.responses]);
   const update = (id: string, patch: Partial<Response>) => {
+    setValidation(null);
     const item = a.items.find((i) => i.id === id)!;
     setResponses((prev) => ({
       ...prev,
@@ -207,10 +214,22 @@ export default function ActivityDetail({
     dayKey(new Date(a.due_at)) > dayKey(new Date()),
   );
   const cycle = data.preparation_cycles.find((c) => c.id === a.cycle_id);
-  const showSuccess = (message: string, terminal = false) =>
+  const stay = data.stays.find((s) => s.id === cycle?.stay_id);
+  const booking = data.team_agenda.find((r) => r.id === order?.reservation_id);
+  const arrival = booking?.checkin ?? stay?.checkin;
+  const departure = booking?.checkout ?? stay?.checkout;
+  const guests = booking?.guests ?? stay?.guests ?? a.occupancy;
+  const nights =
+    booking?.duration_nights ??
+    (arrival && departure
+      ? Math.round((Date.parse(departure) - Date.parse(arrival)) / 86400000)
+      : null);
+
+  const showSuccess = (message: string, terminal = false, title?: string) =>
     setFeedback({
       kind: 'success',
-      title: terminal ? 'Atividade enviada com sucesso!' : 'Tudo certo!',
+      title:
+        title ?? (terminal ? 'Atividade enviada com sucesso!' : 'Tudo certo!'),
       message,
       actionLabel: terminal ? 'Concluir atividade' : 'Retomar vistoria',
       onAction: terminal ? onClose : () => setFeedback(null),
@@ -259,7 +278,7 @@ export default function ActivityDetail({
         else onClose();
       }}
       wide
-      className="checklist-modal"
+      className="checklist-modal execution-modal"
       feedback={
         executionError
           ? {
@@ -275,243 +294,242 @@ export default function ActivityDetail({
           : feedback
       }
     >
-      {order && manager && (
-        <OrderManagement
-          order={order}
-          run={runAction}
-          onChanged={(action) => {
-            if (action === 'delete') onClose();
-          }}
-          onError={setExecutionError}
-        />
-      )}
-      <ExecutionSummary activity={a} data={data} person={person} />
-      {order && (
-        <OrderStayContext
-          order={order}
-          data={data}
-          manager={manager}
-          run={runAction}
-          showSummary={false}
-          onError={setExecutionError}
-        />
-      )}
-      <div className="progress-line">
-        <span>
-          {progress({ ...a, responses })}% dos itens obrigatórios conferidos
-        </span>
-        <progress max={100} value={progress({ ...a, responses })} />
-      </div>
-      {draft && draft.revision !== a.revision && !submitted && (
-        <div className="alert">
-          <Save size={20} />
-          <div>
-            Rascunho local de {dateTime(draft.savedAt)}.
-            {draft.revision !== a.revision
-              ? ' A versão do servidor mudou. Compare antes de reaplicar; nada será sobrescrito automaticamente.'
-              : ''}
-            <details>
-              <summary>Comparar com a conferência no servidor</summary>
-              <ul>
-                {a.items.map((i) => (
-                  <li key={i.id}>
-                    {i.title}:{' '}
-                    {a.responses[i.id]?.confirmed ? 'checkado' : 'pendente'}
-                    {i.mode === 'count'
-                      ? ` · quantidade ${a.responses[i.id]?.found ?? 'não informada'}`
-                      : ''}
-                  </li>
-                ))}
-              </ul>
-            </details>
-            <div className="button-row">
-              <button
-                className="text-button"
-                disabled={
-                  Boolean(draft.attempt && draft.attempt !== a.attempt) ||
-                  !editable
-                }
-                onClick={() => {
-                  if (!dirty.current)
-                    setResponses(
-                      executionResponses(a.items, draft.responses, lockedItems),
-                    );
-                  if (!dirty.current) setPhotos(draft.photos ?? []);
-                  setDraftRevision(a.revision);
-                  setSubmissionId(draft.submissionId ?? crypto.randomUUID());
-                  dirty.current = true;
-                  setSync('Rascunho recuperado; aguardando envio');
-                }}
-              >
-                Recuperar rascunho nesta revisão
-              </button>
-              <button
-                className="text-button"
-                onClick={() =>
-                  void removeDraft(user, a.id).then(() => setDraft(undefined))
-                }
-              >
-                Descartar rascunho
-              </button>
-            </div>
-          </div>
+      <div
+        className="execution-toolbar"
+        aria-label="Informações fixas da vistoria"
+      >
+        <div className="stay-facts">
+          <span>
+            <Users size={17} />
+            <strong>{guests}</strong> hóspedes
+          </span>
+          {nights !== null && (
+            <span>
+              <Moon size={17} />
+              <strong>{nights}</strong> diária(s)
+            </span>
+          )}
         </div>
-      )}
-      {reviews
-        .filter((r) => r.decision === 'rejected')
-        .map((r) => (
-          <div className="alert" key={r.id}>
-            <AlertTriangle size={18} />
+        <div className="execution-progress">
+          <span>{progress({ ...a, responses })}% conferido</span>
+          <progress max={100} value={progress({ ...a, responses })} />
+        </div>
+      </div>
+      <div className="execution-body">
+        <ExecutionSummary activity={a} data={data} person={person} compact />
+        {order && (
+          <OrderStayContext
+            order={order}
+            data={data}
+            manager={manager}
+            run={runAction}
+            showSummary={false}
+            onError={setExecutionError}
+          />
+        )}
+        {draft && draft.revision !== a.revision && !submitted && (
+          <div className="alert">
+            <Save size={20} />
             <div>
-              <strong>Correção da tentativa {r.attempt}</strong>
-              <p>{r.reason}</p>
+              Rascunho local de {dateTime(draft.savedAt)}.
+              {draft.revision !== a.revision
+                ? ' A versão do servidor mudou. Compare antes de reaplicar; nada será sobrescrito automaticamente.'
+                : ''}
+              <details>
+                <summary>Comparar com a conferência no servidor</summary>
+                <ul>
+                  {a.items.map((i) => (
+                    <li key={i.id}>
+                      {i.title}:{' '}
+                      {a.responses[i.id]?.confirmed ? 'checkado' : 'pendente'}
+                      {i.mode === 'count'
+                        ? ` · quantidade ${a.responses[i.id]?.found ?? 'não informada'}`
+                        : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+              <div className="button-row">
+                <button
+                  className="text-button"
+                  disabled={
+                    Boolean(draft.attempt && draft.attempt !== a.attempt) ||
+                    !editable
+                  }
+                  onClick={() => {
+                    if (!dirty.current)
+                      setResponses(
+                        executionResponses(
+                          a.items,
+                          draft.responses,
+                          lockedItems,
+                        ),
+                      );
+                    if (!dirty.current) setPhotos(draft.photos ?? []);
+                    setDraftRevision(a.revision);
+                    setSubmissionId(draft.submissionId ?? crypto.randomUUID());
+                    dirty.current = true;
+                    setSync('Rascunho recuperado; aguardando envio');
+                  }}
+                >
+                  Recuperar rascunho nesta revisão
+                </button>
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    void removeDraft(user, a.id).then(() => setDraft(undefined))
+                  }
+                >
+                  Descartar rascunho
+                </button>
+              </div>
             </div>
           </div>
-        ))}
-      {pending && (
-        <button
-          className="button primary full"
-          disabled={busy || futureOrder}
-          onClick={() =>
-            void runAction(
-              () => mutate('start'),
-              'Execução iniciada. Você pode preencher o checklist.',
-            )
-          }
-        >
-          <Sparkles size={18} />
-          Iniciar{' '}
-          {order
-            ? 'ordem de serviço'
-            : a.kind === 'inspection'
-              ? 'vistoria'
-              : 'arrumação'}
-        </button>
-      )}
-      {pending && futureOrder && (
-        <p className="info-card">
-          Esta ordem está programada para {dateTime(a.due_at)}. A execução
-          estará disponível no dia previsto.
-        </p>
-      )}
-      {[...new Set(a.items.map((i) => i.room))].map((room) => (
-        <section className="room-section" key={room}>
-          <h3>
-            <House size={18} />
-            {room}
-          </h3>
-          {a.items
-            .filter((i) => i.room === room)
-            .map((i) => {
-              const r = itemResponse(i, responses[i.id]);
-              const lockedItem =
-                lockedItems.includes(i.id) || busy || sending || !draftReady;
-              const Extras = i.mode === 'count' ? 'details' : 'div';
-              return (
-                <div
-                  className={`checklist-item ${i.mode === 'count' ? 'count-inline' : ''}`}
-                  key={i.id}
-                >
-                  <div className="checklist-item-title">
-                    <label className="check-label">
-                      <input
-                        type="checkbox"
-                        checked={r.confirmed}
-                        disabled={!editable || lockedItem}
-                        onChange={(e) =>
-                          update(i.id, { confirmed: e.target.checked })
-                        }
-                      />
-                      <strong>{i.title}</strong>
-                    </label>
-                    {i.required && (
-                      <span className="required">Obrigatório</span>
-                    )}
-                  </div>
-                  {i.mode === 'count' && (
-                    <>
-                      {' '}
-                      <div className="counter-row">
-                        <span>
-                          Esperado: <strong>{i.expected}</strong>
-                        </span>
-                        <label className="counter">
-                          <button
-                            aria-label={`Diminuir quantidade de ${i.title}`}
+        )}
+        {reviews
+          .filter((r) => r.decision === 'rejected')
+          .map((r) => (
+            <div className="alert" key={r.id}>
+              <AlertTriangle size={18} />
+              <div>
+                <strong>Correção da tentativa {r.attempt}</strong>
+                <p>{r.reason}</p>
+              </div>
+            </div>
+          ))}
+        {pending && futureOrder && (
+          <p className="info-card">
+            Esta ordem está programada para {dateTime(a.due_at)}. A execução
+            estará disponível no dia previsto.
+          </p>
+        )}
+        {[...new Set(a.items.map((i) => i.room))].map((room) => (
+          <section className="room-section" key={room}>
+            <h3>
+              <House size={18} />
+              {room}
+            </h3>
+            {a.items
+              .filter((i) => i.room === room)
+              .map((i) => {
+                const r = itemResponse(i, responses[i.id]);
+                const lockedItem =
+                  lockedItems.includes(i.id) || busy || sending || !draftReady;
+                const problem =
+                  r.condition === 'damaged' ||
+                  r.condition === 'divergent' ||
+                  r.answer === 'issue';
+                return (
+                  <div
+                    className={`checklist-item ${i.mode === 'count' ? 'count-inline' : ''}`}
+                    key={i.id}
+                    ref={(node) => {
+                      if (node) itemNodes.current.set(i.id, node);
+                      else itemNodes.current.delete(i.id);
+                    }}
+                    tabIndex={-1}
+                    aria-invalid={validation?.itemId === i.id || undefined}
+                  >
+                    <div className="checklist-item-title">
+                      <label className="check-label">
+                        <input
+                          type="checkbox"
+                          checked={r.confirmed}
+                          disabled={!editable || lockedItem}
+                          onChange={(e) =>
+                            update(i.id, { confirmed: e.target.checked })
+                          }
+                        />
+                        <strong>{i.title}</strong>
+                      </label>
+                      {!i.required && (
+                        <span className="required">Opcional</span>
+                      )}
+                    </div>
+                    {i.mode === 'count' && (
+                      <>
+                        {' '}
+                        <div className="counter-row">
+                          <span>
+                            Esperado: <strong>{i.expected}</strong>
+                          </span>
+                          <label className="counter">
+                            <button
+                              aria-label={`Diminuir quantidade de ${i.title}`}
+                              disabled={!editable || lockedItem}
+                              onClick={() =>
+                                update(i.id, {
+                                  found: Math.max(0, (r.found ?? 0) - 1),
+                                })
+                              }
+                            >
+                              −
+                            </button>
+                            <input
+                              aria-label={`Quantidade encontrada de ${i.title}`}
+                              type="number"
+                              min={0}
+                              disabled={!editable || lockedItem}
+                              value={r.found ?? ''}
+                              onChange={(e) =>
+                                update(i.id, {
+                                  found: Number(e.target.value),
+                                })
+                              }
+                            />
+                            <button
+                              aria-label={`Aumentar quantidade de ${i.title}`}
+                              disabled={!editable || lockedItem}
+                              onClick={() =>
+                                update(i.id, {
+                                  found: Math.min(9999, (r.found ?? 0) + 1),
+                                })
+                              }
+                            >
+                              +
+                            </button>
+                          </label>
+                          {r.found !== undefined && r.found !== i.expected && (
+                            <span className="error-text quantity-warning">
+                              Quantidade divergente
+                            </span>
+                          )}
+                        </div>
+                        <label className="field">
+                          <span>Condição</span>
+                          <select
+                            aria-label={`Condição de ${i.title}`}
                             disabled={!editable || lockedItem}
-                            onClick={() =>
+                            value={r.condition ?? 'ok'}
+                            onChange={(e) =>
                               update(i.id, {
-                                found: Math.max(0, (r.found ?? 0) - 1),
+                                condition: e.target.value,
                               })
                             }
                           >
-                            −
-                          </button>
-                          <input
-                            aria-label={`Quantidade encontrada de ${i.title}`}
-                            type="number"
-                            min={0}
-                            disabled={!editable || lockedItem}
-                            value={r.found ?? ''}
-                            onChange={(e) =>
-                              update(i.id, { found: Number(e.target.value) })
-                            }
-                          />
-                          <button
-                            aria-label={`Aumentar quantidade de ${i.title}`}
-                            disabled={!editable || lockedItem}
-                            onClick={() =>
-                              update(i.id, { found: (r.found ?? 0) + 1 })
-                            }
-                          >
-                            +
-                          </button>
+                            {[
+                              { value: 'ok', label: 'Conforme' },
+                              { value: 'damaged', label: 'Danificado' },
+                              {
+                                value: 'divergent',
+                                label: 'Quantidade divergente',
+                              },
+                            ].map((c) => (
+                              <option
+                                key={c.value}
+                                value={c.value}
+                                disabled={
+                                  c.value === 'divergent'
+                                    ? r.found === i.expected
+                                    : r.found !== i.expected
+                                }
+                              >
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
                         </label>
-                        {r.found !== undefined && r.found !== i.expected && (
-                          <span className="error-text quantity-warning">
-                            Quantidade divergente
-                          </span>
-                        )}
-                      </div>
-                      <label className="field">
-                        <span>Condição</span>
-                        <select
-                          disabled={!editable || lockedItem}
-                          value={r.condition ?? 'ok'}
-                          onChange={(e) =>
-                            update(i.id, { condition: e.target.value })
-                          }
-                        >
-                          {[
-                            { value: 'ok', label: 'Conforme' },
-                            { value: 'damaged', label: 'Danificado' },
-                            {
-                              value: 'divergent',
-                              label: 'Quantidade divergente',
-                            },
-                          ].map((c) => (
-                            <option
-                              key={c.value}
-                              value={c.value}
-                              disabled={
-                                c.value === 'divergent'
-                                  ? r.found === i.expected
-                                  : r.found !== i.expected
-                              }
-                            >
-                              {c.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </>
-                  )}
-                  <Extras className="item-extras">
-                    {i.mode === 'count' && (
-                      <summary>Observações e reposição</summary>
-                    )}
-                    {i.instructions && (
-                      <p className="muted">{i.instructions}</p>
+                      </>
                     )}
                     {i.mode === 'technical' && (
                       <label className="field">
@@ -520,7 +538,9 @@ export default function ActivityDetail({
                           disabled={!editable || lockedItem}
                           value={r.answer ?? 'ok'}
                           onChange={(e) =>
-                            update(i.id, { answer: e.target.value })
+                            update(i.id, {
+                              answer: e.target.value,
+                            })
                           }
                         >
                           <option value="ok">Conforme</option>
@@ -531,424 +551,545 @@ export default function ActivityDetail({
                         </select>
                       </label>
                     )}
-                    {i.mode === 'count' && (
-                      <>
-                        <details>
-                          <summary>Movimentação de enxoval e reposição</summary>
-                          <div className="two-cols">
-                            {[
-                              {
-                                key: 'laundry',
-                                label: 'Recolhido para lavanderia',
-                              },
-                              { key: 'damaged', label: 'Danificado' },
-                              { key: 'missing', label: 'Não localizado' },
-                              { key: 'replenished', label: 'Reposto' },
-                            ].map((f) => (
-                              <label className="field" key={f.key}>
-                                <span>{f.label}</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  disabled={!editable || lockedItem}
-                                  value={
-                                    (r[f.key as keyof Response] as number) ?? ''
-                                  }
-                                  onChange={(e) =>
-                                    update(i.id, {
-                                      [f.key]: Number(e.target.value),
-                                    })
-                                  }
-                                />
-                              </label>
-                            ))}
-                          </div>
-                          <small>
-                            Itens recolhidos para lavanderia não são tratados
-                            como desaparecidos.
-                          </small>
-                        </details>
-                      </>
+                    {validation?.itemId === i.id && (
+                      <p className="item-validation" role="alert">
+                        {validation.message}
+                      </p>
                     )}
-                    <label className="field">
-                      <span>
-                        Observação{' '}
-                        {r.answer === 'issue' ||
-                        r.condition === 'damaged' ||
-                        (r.found !== undefined && r.found !== i.expected)
-                          ? '(obrigatória para divergências)'
-                          : '(opcional)'}
-                      </span>
-                      <textarea
-                        disabled={!editable || lockedItem}
-                        value={r.note ?? ''}
-                        onChange={(e) => update(i.id, { note: e.target.value })}
-                      />
-                    </label>
-                    <div className="button-row">
-                      {i.reference_path && (
-                        <button
-                          className="button secondary"
-                          onClick={() =>
-                            void runAction(
-                              async () =>
-                                setImage({
-                                  url: await signedImage(
-                                    'references',
-                                    i.reference_path!,
-                                  ),
-                                  label: `Referência · ${i.title}`,
-                                }),
-                              '',
-                            )
-                          }
-                        >
-                          <Image size={16} />
-                          Ver referência
-                        </button>
+                    <details
+                      className="item-extras"
+                      open={
+                        problem || validation?.itemId === i.id
+                          ? true
+                          : undefined
+                      }
+                    >
+                      <summary>
+                        {problem
+                          ? 'Descrever problema'
+                          : 'Observações e detalhes'}
+                      </summary>
+                      {i.instructions && (
+                        <p className="muted">{i.instructions}</p>
                       )}
-                    </div>
-                  </Extras>
-                </div>
-              );
-            })}
-        </section>
-      ))}
-      <section className="room-section">
-        <h3>
-          <AlertTriangle size={18} />
-          Ocorrências
-        </h3>
-        {findings.map((f) => (
-          <div className="finding" key={f.id}>
-            <strong>{f.title}</strong>
-            <p>{f.description}</p>
-            <small>
-              {f.resolved_at
-                ? 'Resolvida'
-                : f.blocking
-                  ? 'Impede a liberação'
-                  : 'Não impeditiva'}
-            </small>
-            {manager && !f.resolved_at && (
-              <Form
-                fields={[
-                  { name: 'reason', label: 'Justificativa da resolução' },
-                ]}
-                submit="Resolver ocorrência"
-                onSubmit={(v) =>
-                  runAction(() =>
-                    rpc('resolve_finding', { finding: f.id, reason: v.reason }),
+                      <label className="field">
+                        <span>
+                          Observação{' '}
+                          {r.answer === 'issue' ||
+                          r.condition === 'damaged' ||
+                          (r.found !== undefined && r.found !== i.expected)
+                            ? '(obrigatória para divergências)'
+                            : '(opcional)'}
+                        </span>
+                        <textarea
+                          disabled={!editable || lockedItem}
+                          value={r.note ?? ''}
+                          onChange={(e) =>
+                            update(i.id, { note: e.target.value })
+                          }
+                        />
+                      </label>
+                      {i.mode === 'count' && (
+                        <>
+                          <details>
+                            <summary>
+                              Movimentação de enxoval e reposição
+                            </summary>
+                            <div className="two-cols">
+                              {[
+                                {
+                                  key: 'laundry',
+                                  label: 'Recolhido para lavanderia',
+                                },
+                                { key: 'damaged', label: 'Danificado' },
+                                { key: 'missing', label: 'Não localizado' },
+                                { key: 'replenished', label: 'Reposto' },
+                              ].map((f) => (
+                                <label className="field" key={f.key}>
+                                  <span>{f.label}</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    disabled={!editable || lockedItem}
+                                    value={
+                                      (r[f.key as keyof Response] as number) ??
+                                      ''
+                                    }
+                                    onChange={(e) =>
+                                      update(i.id, {
+                                        [f.key]: Number(e.target.value),
+                                      })
+                                    }
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            <small>
+                              Itens recolhidos para lavanderia não são tratados
+                              como desaparecidos.
+                            </small>
+                          </details>
+                        </>
+                      )}
+                      <div className="button-row">
+                        {i.reference_path && (
+                          <button
+                            className="button secondary"
+                            onClick={() =>
+                              void runAction(
+                                async () =>
+                                  setImage({
+                                    url: await signedImage(
+                                      'references',
+                                      i.reference_path!,
+                                    ),
+                                    label: `Referência · ${i.title}`,
+                                  }),
+                                '',
+                              )
+                            }
+                          >
+                            <Image size={16} />
+                            Ver referência
+                          </button>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                );
+              })}
+          </section>
+        ))}
+        <details
+          className="room-section execution-findings"
+          open={findings.length > 0 || finding ? true : undefined}
+        >
+          <summary>
+            <AlertTriangle size={18} /> Ocorrências{' '}
+            {findings.length ? `(${findings.length})` : '(opcional)'}
+          </summary>
+          {findings.map((f) => (
+            <div className="finding" key={f.id}>
+              <strong>{f.title}</strong>
+              <p>{f.description}</p>
+              <small>
+                {f.resolved_at
+                  ? 'Resolvida'
+                  : f.blocking
+                    ? 'Impede a liberação'
+                    : 'Não impeditiva'}
+              </small>
+              {manager && !f.resolved_at && (
+                <Form
+                  fields={[
+                    { name: 'reason', label: 'Justificativa da resolução' },
+                  ]}
+                  submit="Resolver ocorrência"
+                  onSubmit={(v) =>
+                    runAction(() =>
+                      rpc('resolve_finding', {
+                        finding: f.id,
+                        reason: v.reason,
+                      }),
+                    )
+                  }
+                />
+              )}
+            </div>
+          ))}
+          {!isDone(a) && (
+            <button
+              className="button secondary"
+              onClick={() => setFinding(!finding)}
+            >
+              <Plus size={16} />
+              Registrar ocorrência
+            </button>
+          )}
+          {finding && (
+            <Form
+              fields={[
+                { name: 'title', label: 'Título' },
+                { name: 'description', label: 'Descrição', type: 'textarea' },
+                {
+                  name: 'blocking',
+                  label: 'Impede a liberação?',
+                  options: [
+                    { value: 'false', label: 'Não' },
+                    { value: 'true', label: 'Sim' },
+                  ],
+                  value: 'false',
+                },
+              ]}
+              onSubmit={async (v) => {
+                if (
+                  await runAction(() =>
+                    rpc('create_finding', {
+                      activity: a.id,
+                      payload: { ...v, blocking: v.blocking === 'true' },
+                    }),
                   )
-                }
-              />
+                )
+                  setFinding(false);
+              }}
+            />
+          )}
+        </details>
+        <ExecutionPhotos
+          photos={photos}
+          evidence={evidence}
+          attempt={a.attempt}
+          editable={editable && draftReady && !busy && !sending}
+          onChange={(next) => {
+            setValidation(null);
+            setPhotos(next);
+            dirty.current = true;
+            setSync('Rascunho com alterações');
+          }}
+          onError={setExecutionError}
+          onView={async (e) => {
+            try {
+              setImage({
+                url: await signedImage('evidence', e.path),
+                label: 'Foto da vistoria',
+              });
+            } catch (error) {
+              setExecutionError(
+                error instanceof Error
+                  ? error.message
+                  : 'Não foi possível abrir a foto.',
+              );
+            }
+          }}
+        />
+        {reviewing && reject && (
+          <div className="review-correction" id={`review-correction-${a.id}`}>
+            {reject && (
+              <>
+                <p>Selecione os itens que precisam de correção:</p>
+                {a.items.map((i) => (
+                  <label key={i.id} className="check-label">
+                    <input
+                      type="checkbox"
+                      checked={rejected.includes(i.id)}
+                      onChange={(e) =>
+                        setRejected((prev) =>
+                          e.target.checked
+                            ? [...prev, i.id]
+                            : prev.filter((x) => x !== i.id),
+                        )
+                      }
+                    />
+                    {i.room} · {i.title}
+                  </label>
+                ))}
+                <Form
+                  fields={[
+                    {
+                      name: 'reason',
+                      label: 'Justificativa da correção',
+                      type: 'textarea',
+                    },
+                  ]}
+                  submit="Devolver para correção"
+                  onSubmit={async (v) => {
+                    if (
+                      await runAction(() =>
+                        mutate('reject', { ...v, items: rejected }),
+                      )
+                    )
+                      showSuccess(
+                        'A atividade foi devolvida para correção.',
+                        true,
+                        'Correção solicitada',
+                      );
+                  }}
+                />
+              </>
             )}
           </div>
-        ))}
-        {!isDone(a) && (
-          <button
-            className="button secondary"
-            onClick={() => setFinding(!finding)}
-          >
-            <Plus size={16} />
-            Registrar ocorrência
-          </button>
         )}
-        {finding && (
-          <Form
-            fields={[
-              { name: 'title', label: 'Título' },
-              { name: 'description', label: 'Descrição', type: 'textarea' },
-              {
-                name: 'blocking',
-                label: 'Impede a liberação?',
-                options: [
-                  { value: 'false', label: 'Não' },
-                  { value: 'true', label: 'Sim' },
-                ],
-                value: 'false',
-              },
-            ]}
-            onSubmit={async (v) => {
-              if (
-                await runAction(() =>
-                  rpc('create_finding', {
-                    activity: a.id,
-                    payload: { ...v, blocking: v.blocking === 'true' },
+        {!order && manager && !isDone(a) && cycle?.reservation_id && (
+          <p className="info-card">
+            Para mudar a data do checkout, use Editar saída na Agenda da equipe.
+            A vistoria e a limpeza serão movidas juntas.
+          </p>
+        )}
+        {!order && manager && !isDone(a) && !cycle?.reservation_id && (
+          <details className="room-section" open={schedule}>
+            <summary
+              onClick={(e) => {
+                e.preventDefault();
+                setSchedule(!schedule);
+              }}
+            >
+              Programação e responsabilidade
+            </summary>
+            <Form
+              fields={[
+                {
+                  name: 'assignee',
+                  label: 'Responsável',
+                  options: data.profiles
+                    .filter((p) => p.active)
+                    .map((p) => ({ value: p.id, label: p.name })),
+                  value: a.assignee,
+                },
+                {
+                  name: 'due_at',
+                  label: 'Prazo',
+                  type: 'datetime-local',
+                  value: dueDefault(),
+                },
+                {
+                  name: 'priority',
+                  label: 'Prioridade',
+                  options: [
+                    { value: 'normal', label: 'Normal' },
+                    { value: 'high', label: 'Alta' },
+                    { value: 'urgent', label: 'Urgente' },
+                  ],
+                  value: a.priority,
+                },
+                { name: 'reason', label: 'Justificativa' },
+              ]}
+              submit="Atualizar programação"
+              onSubmit={(v) =>
+                runAction(() =>
+                  mutate('schedule', {
+                    ...v,
+                    due_at: new Date(v.due_at).toISOString(),
                   }),
                 )
-              )
-                setFinding(false);
+              }
+            />
+            <Form
+              fields={[
+                { name: 'reason', label: 'Justificativa para cancelar' },
+              ]}
+              submit="Cancelar atividade"
+              onSubmit={async (v) => {
+                if (await runAction(() => mutate('cancel', v)))
+                  showSuccess('Atividade cancelada com sucesso.', true);
+              }}
+            />
+          </details>
+        )}
+        <details className="room-section">
+          <summary>
+            Histórico de submissões e decisões ({reviews.length})
+          </summary>
+          {reviews.map((r) => (
+            <div className="review-history" key={r.id}>
+              <strong>
+                Tentativa {r.attempt} ·{' '}
+                {r.decision === 'approved'
+                  ? 'Aprovada'
+                  : r.decision === 'rejected'
+                    ? 'Devolvida'
+                    : 'Enviada'}
+              </strong>
+              <p>
+                {dateTime(r.submitted_at)}
+                {r.reviewer ? ` · Revisão de ${person(r.reviewer)}` : ''}
+              </p>
+              <p>{r.reason}</p>
+              <details>
+                <summary>Respostas preservadas</summary>
+                <pre>{JSON.stringify(r.snapshot.responses, null, 2)}</pre>
+              </details>
+            </div>
+          ))}
+        </details>
+        {order && manager && (
+          <OrderManagement
+            order={order}
+            run={runAction}
+            onChanged={(action) => {
+              if (action === 'delete') onClose();
             }}
+            onError={setExecutionError}
           />
         )}
-      </section>
-      <ExecutionPhotos
-        photos={photos}
-        evidence={evidence}
-        attempt={a.attempt}
-        editable={editable && draftReady && !busy && !sending}
-        onChange={(next) => {
-          setPhotos(next);
-          dirty.current = true;
-          setSync('Rascunho com alterações');
-        }}
-        onError={setExecutionError}
-        onView={async (e) => {
-          try {
-            setImage({
-              url: await signedImage('evidence', e.path),
-              label: 'Foto da vistoria',
-            });
-          } catch (error) {
-            setExecutionError(
-              error instanceof Error
-                ? error.message
-                : 'Não foi possível abrir a foto.',
-            );
-          }
-        }}
-      />
-      {editable && (
-        <div className="detail-actions">
-          <small>{sync}</small>
-          <div className="button-row">
-            <button
-              className="button secondary"
-              disabled={busy || sending || !draftReady}
-              onClick={() =>
-                void runAction(async () => {
-                  await persist(makeDraft());
-                  setSync('Rascunho salvo');
-                }, 'Rascunho salvo.')
-              }
-            >
-              <Save size={17} />
-              Salvar Rascunho
-            </button>
-            <button
-              className="button primary"
-              disabled={busy || sending || !draftReady}
-              onClick={async () => {
-                setSending(true);
-                setExecutionError('');
-                const ok = await runAction(async () => {
-                  try {
-                    await sendExecution(makeDraft(), {
-                      persist: async (d) => {
-                        await persist(d);
-                        setPhotos(d.photos ?? []);
-                      },
-                      upload: (photo) =>
-                        uploadPhoto(
-                          'activity',
-                          a.id,
-                          photo.file,
-                          '__activity__',
-                          photo.id,
-                        ),
-                      submit: (d) =>
-                        rpc('submit_checklist', {
-                          activity: a.id,
-                          expected_revision: d.revision,
-                          submission: d.submissionId,
-                          responses: d.responses,
-                        }),
-                    });
-                  } catch (error) {
-                    setExecutionError(
-                      error instanceof Error
-                        ? error.message
-                        : 'Não foi possível enviar a vistoria.',
-                    );
-                    throw error;
-                  }
-                }, 'Vistoria enviada para aprovação com sucesso.');
-                if (ok) {
-                  setSubmitted(true);
-                  showSuccess(
-                    'A vistoria foi recebida e enviada para aprovação. Você pode concluir esta etapa.',
-                    true,
-                  );
-                  dirty.current = false;
-                  setDraft(undefined);
-                  void removeDraft(user, a.id).catch(() => {});
-                } else {
-                  setExecutionError(
-                    (previous) =>
-                      previous || 'Não foi possível confirmar o envio.',
-                  );
+      </div>
+      <footer className="execution-footer">
+        {validation && !validation.itemId && (
+          <p className="item-validation" role="alert">
+            {validation.message}
+          </p>
+        )}
+        {pending && (
+          <button
+            className="button primary full"
+            disabled={busy || futureOrder}
+            onClick={() => void runAction(() => mutate('start'), '')}
+          >
+            <Sparkles size={18} />
+            Iniciar{' '}
+            {order
+              ? 'ordem de serviço'
+              : a.kind === 'inspection'
+                ? 'vistoria'
+                : 'arrumação'}
+          </button>
+        )}
+        {editable && (
+          <div className="detail-actions">
+            <small>{sync}</small>
+            <div className="button-row">
+              <button
+                className="button secondary"
+                disabled={busy || sending || !draftReady}
+                onClick={() =>
+                  void runAction(async () => {
+                    await persist(makeDraft());
+                    setSync('Rascunho salvo');
+                  }, '')
                 }
-                setSending(false);
-              }}
-            >
-              <Send size={17} />
-              {sending ? 'Enviando…' : 'Enviar para aprovação'}
-            </button>
-          </div>
-          <small>
-            Respostas e até {MAX_EXECUTION_PHOTOS} fotos são enviadas juntas. Em
-            caso de erro, você pode continuar de onde parou.
-          </small>
-        </div>
-      )}
-      {reviewing && (
-        <div className="detail-actions">
-          <div className="button-row">
-            <button
-              className="button primary"
-              disabled={busy}
-              onClick={async () => {
-                if (
-                  await runAction(async () => {
-                    await mutate('approve');
-                  })
-                )
-                  showSuccess('Atividade aprovada com sucesso.', true);
-              }}
-            >
-              <CheckCheck size={18} />
-              Aprovar arrumação
-            </button>
-            <button
-              className="button secondary"
-              onClick={() => setReject(!reject)}
-            >
-              Solicitar correção
-            </button>
-          </div>
-          {reject && (
-            <>
-              <p>Selecione os itens que precisam de correção:</p>
-              {a.items.map((i) => (
-                <label key={i.id} className="check-label">
-                  <input
-                    type="checkbox"
-                    checked={rejected.includes(i.id)}
-                    onChange={(e) =>
-                      setRejected((prev) =>
-                        e.target.checked
-                          ? [...prev, i.id]
-                          : prev.filter((x) => x !== i.id),
-                      )
+              >
+                <Save size={17} />
+                Salvar Rascunho
+              </button>
+              <button
+                className="button primary"
+                disabled={busy || sending || !draftReady}
+                onClick={async () => {
+                  const issue = executionIssue(
+                    a.items,
+                    responses,
+                    photos.length > 0 ||
+                      evidence.some(
+                        (e) => a.attempt === 1 || e.attempt === a.attempt,
+                      ),
+                    lockedItems,
+                  );
+                  setValidation(issue);
+                  if (issue) {
+                    if (issue.itemId) {
+                      const node = itemNodes.current.get(issue.itemId);
+                      node?.scrollIntoView({
+                        block: 'center',
+                        behavior: 'smooth',
+                      });
+                      node?.focus({ preventScroll: true });
                     }
-                  />
-                  {i.room} · {i.title}
-                </label>
-              ))}
-              <Form
-                fields={[
-                  {
-                    name: 'reason',
-                    label: 'Justificativa da correção',
-                    type: 'textarea',
-                  },
-                ]}
-                submit="Devolver para correção"
-                onSubmit={async (v) => {
-                  if (
-                    await runAction(() =>
-                      mutate('reject', { ...v, items: rejected }),
-                    )
-                  )
+                    return;
+                  }
+                  setSending(true);
+                  setExecutionError('');
+                  const ok = await runAction(async () => {
+                    try {
+                      await sendExecution(makeDraft(), {
+                        persist: async (d) => {
+                          await persist(d);
+                          setPhotos(d.photos ?? []);
+                        },
+                        upload: (photo) =>
+                          uploadPhoto(
+                            'activity',
+                            a.id,
+                            photo.file,
+                            '__activity__',
+                            photo.id,
+                          ),
+                        submit: (d) =>
+                          rpc('submit_checklist', {
+                            activity: a.id,
+                            expected_revision: d.revision,
+                            submission: d.submissionId,
+                            responses: d.responses,
+                          }),
+                      });
+                    } catch (error) {
+                      setExecutionError(
+                        error instanceof Error
+                          ? error.message
+                          : 'Não foi possível enviar a vistoria.',
+                      );
+                      throw error;
+                    }
+                  }, 'Vistoria enviada para aprovação com sucesso.');
+                  if (ok) {
+                    setSubmitted(true);
                     showSuccess(
-                      'A atividade foi devolvida para correção.',
+                      'A vistoria foi recebida e enviada para aprovação. Você pode concluir esta etapa.',
                       true,
                     );
+                    dirty.current = false;
+                    setDraft(undefined);
+                    void removeDraft(user, a.id).catch(() => {});
+                  } else {
+                    setExecutionError(
+                      (previous) =>
+                        previous || 'Não foi possível confirmar o envio.',
+                    );
+                  }
+                  setSending(false);
                 }}
-              />
-            </>
-          )}
-        </div>
-      )}
-      {manager && !isDone(a) && cycle?.reservation_id && (
-        <p className="info-card">
-          Para mudar a data do checkout, use Editar saída na Agenda da equipe. A
-          vistoria e a limpeza serão movidas juntas.
-        </p>
-      )}
-      {manager && !isDone(a) && !cycle?.reservation_id && (
-        <details className="room-section" open={schedule}>
-          <summary
-            onClick={(e) => {
-              e.preventDefault();
-              setSchedule(!schedule);
-            }}
-          >
-            Programação e responsabilidade
-          </summary>
-          <Form
-            fields={[
-              {
-                name: 'assignee',
-                label: 'Responsável',
-                options: data.profiles
-                  .filter((p) => p.active)
-                  .map((p) => ({ value: p.id, label: p.name })),
-                value: a.assignee,
-              },
-              {
-                name: 'due_at',
-                label: 'Prazo',
-                type: 'datetime-local',
-                value: dueDefault(),
-              },
-              {
-                name: 'priority',
-                label: 'Prioridade',
-                options: [
-                  { value: 'normal', label: 'Normal' },
-                  { value: 'high', label: 'Alta' },
-                  { value: 'urgent', label: 'Urgente' },
-                ],
-                value: a.priority,
-              },
-              { name: 'reason', label: 'Justificativa' },
-            ]}
-            submit="Atualizar programação"
-            onSubmit={(v) =>
-              runAction(() =>
-                mutate('schedule', {
-                  ...v,
-                  due_at: new Date(v.due_at).toISOString(),
-                }),
-              )
-            }
-          />
-          <Form
-            fields={[{ name: 'reason', label: 'Justificativa para cancelar' }]}
-            submit="Cancelar atividade"
-            onSubmit={async (v) => {
-              if (await runAction(() => mutate('cancel', v)))
-                showSuccess('Atividade cancelada com sucesso.', true);
-            }}
-          />
-        </details>
-      )}
-      <details className="room-section">
-        <summary>Histórico de submissões e decisões ({reviews.length})</summary>
-        {reviews.map((r) => (
-          <div className="review-history" key={r.id}>
-            <strong>
-              Tentativa {r.attempt} ·{' '}
-              {r.decision === 'approved'
-                ? 'Aprovada'
-                : r.decision === 'rejected'
-                  ? 'Devolvida'
-                  : 'Enviada'}
-            </strong>
-            <p>
-              {dateTime(r.submitted_at)}
-              {r.reviewer ? ` · Revisão de ${person(r.reviewer)}` : ''}
-            </p>
-            <p>{r.reason}</p>
-            <details>
-              <summary>Respostas preservadas</summary>
-              <pre>{JSON.stringify(r.snapshot.responses, null, 2)}</pre>
-            </details>
+              >
+                <Send size={17} />
+                {sending ? 'Enviando…' : 'Enviar para aprovação'}
+              </button>
+            </div>
           </div>
-        ))}
-      </details>
+        )}
+        {reviewing && (
+          <div className="review-footer">
+            <strong>
+              {reject ? 'Solicitação de correção' : 'Revisão do checklist'}
+            </strong>{' '}
+            <div className="button-row">
+              {!reject && (
+                <>
+                  <button
+                    className="button primary"
+                    disabled={busy || sending}
+                    onClick={async () => {
+                      setSending(true);
+                      if (
+                        await runAction(async () => {
+                          await mutate('approve');
+                        })
+                      )
+                        showSuccess(
+                          'A revisão foi concluída e a ordem está concluída.',
+                          true,
+                          'Revisão concluída!',
+                        );
+                      setSending(false);
+                    }}
+                  >
+                    <CheckCheck size={18} />
+                    Concluir revisão
+                  </button>
+                </>
+              )}
+              <button
+                className="button secondary"
+                disabled={busy || sending}
+                onClick={() => {
+                  setReject(!reject);
+                  requestAnimationFrame(() =>
+                    document
+                      .getElementById(`review-correction-${a.id}`)
+                      ?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+                  );
+                }}
+              >
+                {reject ? 'Cancelar correção' : 'Solicitar correção'}
+              </button>
+            </div>
+          </div>
+        )}
+        {a.status === 'review' && !manager && (
+          <p className="muted">Enviado. Aguardando revisão de um gestor.</p>
+        )}
+        {isDone(a) && (
+          <button className="button secondary full" onClick={onClose}>
+            Fechar
+          </button>
+        )}
+      </footer>
       {image && (
         <div className="image-viewer" role="region" aria-label={image.label}>
           <div>

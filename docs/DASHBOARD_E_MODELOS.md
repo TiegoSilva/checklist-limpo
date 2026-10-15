@@ -2,7 +2,7 @@
 
 O dashboard começa pelas ordens de check-in e checkout programadas para hoje, por horário de início e no fuso de São Paulo. O bloco respeita os filtros de propriedade e busca, inclui ordens em aprovação ou já concluídas no dia e omite ordens canceladas ou removidas. Ele não muda ao escolher um período diferente para os demais indicadores.
 
-A fila **Aguardando aprovação** inclui os envios do próprio usuário e da equipe aos quais ele tem acesso, inclusive de dias anteriores. As execuções de checklist aparecem uma única vez. Envios próprios abrem em **Ver envio**; a aprovação continua exigindo outro gestor autorizado no servidor. Colaboradores também têm acesso à página para acompanhar seus envios, respeitando as permissões do Supabase.
+A fila **Aguardando aprovação** inclui os envios do próprio usuário e da equipe aos quais ele tem acesso, inclusive de dias anteriores. As execuções de checklist aparecem uma única vez. Gestores abrem os envios em **Concluir revisão**, inclusive os próprios após a migração 012; colaboradores usam **Ver envio**. Colaboradores também têm acesso à página para acompanhar seus envios, respeitando as permissões do Supabase.
 
 No modelo, itens com quantidade, tarefas e conferências ficam na mesma lista, com um único botão **Adicionar item**. O tipo fica em **Opções → Tipo de conferência**. A edição preserva tarefas existentes e permite mover os itens pela lista inteira. O checkout continua derivando apenas os itens com quantidade do check-in.
 

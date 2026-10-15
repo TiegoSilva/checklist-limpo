@@ -34,7 +34,13 @@ export function updateItemResponse(
   previous: Response | undefined,
   patch: Partial<Response>,
 ) {
-  return itemResponse(item, { ...itemResponse(item, previous), ...patch });
+  const next = { ...itemResponse(item, previous), ...patch };
+  if (
+    patch.confirmed === undefined &&
+    ['found', 'condition', 'answer'].some((key) => Object.hasOwn(patch, key))
+  )
+    next.confirmed = true;
+  return itemResponse(item, next);
 }
 export const MAX_EXECUTION_PHOTOS = 8;
 
@@ -62,4 +68,44 @@ export async function sendExecution(
     });
   }
   await dependencies.submit(state);
+}
+
+export function executionIssue(
+  items: Item[],
+  responses: Record<string, Response>,
+  hasPhoto: boolean,
+  locked: string[] = [],
+): { itemId?: string; message: string } | null {
+  for (const item of items) {
+    if (locked.includes(item.id)) continue;
+    const response = itemResponse(item, responses[item.id]);
+    if (item.required && !response.confirmed)
+      return { itemId: item.id, message: `Confira o item: ${item.title}.` };
+    if (!response.confirmed) continue;
+    if (
+      item.mode === 'count' &&
+      (!Number.isInteger(response.found) ||
+        response.found! < 0 ||
+        response.found! > 9999)
+    )
+      return {
+        itemId: item.id,
+        message: 'Informe uma quantidade inteira entre 0 e 9999.',
+      };
+    if (
+      (response.condition === 'divergent' ||
+        response.condition === 'damaged' ||
+        response.answer === 'issue') &&
+      (response.note?.trim().length ?? 0) < 5
+    )
+      return {
+        itemId: item.id,
+        message: 'Descreva o problema em pelo menos 5 caracteres.',
+      };
+  }
+  if (items.some((i) => i.evidence_required) && !hasPhoto)
+    return {
+      message: 'Adicione pelo menos uma foto da vistoria antes de enviar.',
+    };
+  return null;
 }

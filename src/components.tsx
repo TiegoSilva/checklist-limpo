@@ -1,4 +1,4 @@
-import { statusLabels } from './domain';
+import { statusLabels, orderStatus } from './domain';
 import {
   useEffect,
   useLayoutEffect,
@@ -247,7 +247,9 @@ export function Form({
 
 export function Badge({ status }: { status: string }) {
   return (
-    <span className={`badge status-${status}`}>
+    <span
+      className={`badge status-${['assigned', 'pending', 'in_progress', 'correction', 'rejected', 'review', 'approved', 'completed'].includes(status) ? orderStatus(status) : status}`}
+    >
       <span />
       {statusLabels[status] ?? status}
     </span>

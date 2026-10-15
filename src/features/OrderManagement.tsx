@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Trash2, RotateCcw, Settings2 } from 'lucide-react';
-import type { Data, Service } from '../domain';
+import { orderStatus, type Data, type Service } from '../domain';
 import { rpc, type Run } from '../lib/client';
 const statuses = [
   ['assigned', 'Pendente'],
-  ['in_progress', 'Em execução'],
-  ['review', 'Em aprovação'],
-  ['approved', 'Aprovada'],
-  ['rejected', 'Em correção'],
-  ['cancelled', 'Cancelada'],
+  ['review', 'Aguardando aprovação'],
+  ['approved', 'Concluída'],
 ];
 export default function OrderManagement({
   order,
@@ -21,13 +18,13 @@ export default function OrderManagement({
   onChanged: (action?: 'status' | 'delete') => void;
   onError?: (message: string) => void;
 }) {
-  const [status, setStatus] = useState(order.status),
+  const [status, setStatus] = useState<string>(orderStatus(order.status)),
     [reason, setReason] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [confirm, setConfirm] = useState(false);
   useEffect(() => {
-    setStatus(order.status);
+    setStatus(orderStatus(order.status));
     setConfirm(false);
   }, [order.id, order.revision, order.status]);
   const act = async (action: 'status' | 'delete') => {
@@ -102,7 +99,11 @@ export default function OrderManagement({
       <div className="button-row">
         <button
           className="button secondary"
-          disabled={busy || status === order.status}
+          disabled={
+            busy ||
+            (status === orderStatus(order.status) &&
+              order.status !== 'cancelled')
+          }
           onClick={() => void act('status')}
         >
           Atualizar status

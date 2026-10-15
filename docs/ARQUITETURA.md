@@ -58,7 +58,7 @@ Um administrador precisa também da função operacional correspondente para rec
 
 1. `confirm_checkout`: bloqueia a unidade, verifica idempotência pelo ID do evento, identifica ocupação de reserva ou padrão-base, cria estadia, ciclo e exatamente duas atividades. Templates são copiados como snapshots. Gera auditoria e notificações na mesma transação.
 2. `activity_action`: `pending → in_progress → completed` para vistoria; `pending → in_progress → review → completed` para limpeza. Decisões de correção preservam a submissão anterior, abrem nova tentativa e limpam somente as respostas devolvidas.
-3. Aprovação verifica todas as exigências, vistoria concluída, inexistência de bloqueios e impedimento de autoaprovação. A auditoria também identifica executores anteriores a reatribuições.
+3. Aprovação verifica todas as exigências, vistoria concluída, inexistência de bloqueios e permissão de gestão na unidade. A migração 012 permite revisar a própria execução; a auditoria preserva executor e revisor, inclusive após reatribuições.
 4. Uma nova reserva após liberação compara o checklist aplicável à nova ocupação com a última preparação aprovada. Diferenças geram atividade complementar; retirada de itens condicionais também exige conferência. Sem alterações materiais, apenas atualiza a ocupação atendida, mantendo auditoria.
 5. Serviços exigem responsável e revisão independente. Conclusão exige evidência textual e fotografia verificada. Ocorrências impeditivas devem ser resolvidas por gestor com justificativa. Uma ordem aprovada não libera automaticamente o imóvel.
 

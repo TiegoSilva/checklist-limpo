@@ -183,7 +183,7 @@ describe('execução simplificada e retomada', () => {
     expect(upload).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
   });
-  it('oferece todos os status ao gestor e informa exclusão conjunta do checkout', () => {
+  it('oferece somente os três status ao gestor e informa exclusão conjunta do checkout', () => {
     const order = {
       id: 'order',
       status: 'assigned',
@@ -194,7 +194,7 @@ describe('execução simplificada e retomada', () => {
       <OrderManagement order={order} run={vi.fn()} onChanged={vi.fn()} />,
     );
     expect(html).toContain('Gerenciar ordem de serviço');
-    expect(html.match(/<option/g)).toHaveLength(6);
+    expect(html.match(/<option/g)).toHaveLength(3);
     expect(html).toContain('Excluir ordem');
   });
 });

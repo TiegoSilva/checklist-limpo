@@ -247,19 +247,28 @@ export const emptyData: Data = {
 };
 export const statusLabels: Record<string, string> = {
   pending: 'Pendente',
-  in_progress: 'Em andamento',
+  in_progress: 'Pendente',
   review: 'Aguardando aprovação',
-  correction: 'Correção solicitada',
+  correction: 'Pendente',
   completed: 'Concluída',
   cancelled: 'Cancelada',
   unavailable: 'Indisponível',
   preparing: 'Em preparação',
   ready: 'Pronta para receber',
   adjustment: 'Aguarda adequação',
-  assigned: 'Atribuída',
-  approved: 'Aprovada',
-  rejected: 'Correção solicitada',
+  assigned: 'Pendente',
+  approved: 'Concluída',
+  rejected: 'Pendente',
 };
+export function orderStatus(
+  status: string,
+): 'assigned' | 'review' | 'approved' {
+  return ['approved', 'completed'].includes(status)
+    ? 'approved'
+    : status === 'review'
+      ? 'review'
+      : 'assigned';
+}
 export const dateTime = (s: string) =>
   new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',

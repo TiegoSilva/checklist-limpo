@@ -3946,3 +3946,329 @@ input[type='checkbox']:disabled {
     grid-row: 1;
   }
 }
+/* Execução: contexto e ação principal sempre visíveis. */
+:root {
+  --accent: #d51b4d;
+  --ink: #242424;
+}
+.button.primary {
+  background: var(--accent);
+}
+input[type='checkbox']:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+.badge.status-assigned {
+  background: #f3f2f0;
+  color: #514c46;
+}
+.badge.status-review {
+  background: #fff2da;
+  color: #855300;
+}
+.badge.status-approved {
+  background: #eaf4ec;
+  color: #28603a;
+}
+.badge {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.modal.execution-modal[open] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+.execution-modal .modal-head {
+  position: static;
+  flex-shrink: 0;
+  padding: 12px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.execution-modal .modal-head h2 {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  min-width: 0;
+}
+.execution-modal .modal-head .icon-button {
+  flex-shrink: 0;
+}
+.execution-toolbar {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: #faf9f7;
+}
+.stay-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  font-size: 0.875rem;
+}
+.stay-facts span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stay-facts svg {
+  color: #6a625b;
+}
+.execution-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.execution-progress span {
+  flex-shrink: 0;
+}
+.execution-progress progress {
+  flex: 1;
+  width: 0;
+  height: 5px;
+  accent-color: var(--accent);
+}
+.execution-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  scroll-padding: 16px;
+}
+.execution-body .execution-summary {
+  margin: 0 0 16px;
+  padding: 0 0 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.execution-summary-heading {
+  gap: 10px;
+}
+.execution-schedule {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.execution-more > summary {
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-height: 40px;
+}
+.execution-modal .room-section {
+  padding: 16px 0;
+}
+.execution-modal .room-section > h3 {
+  margin-bottom: 8px;
+}
+.execution-modal .order-management {
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+.execution-modal .order-management > summary {
+  min-height: 44px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.execution-modal .order-stay-context:empty {
+  display: none;
+}
+.execution-modal .checklist-item {
+  margin: 10px 0;
+  padding: 12px;
+  gap: 10px;
+}
+.execution-modal .checklist-item.count-inline {
+  padding: 12px;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.execution-modal .checklist-item-title {
+  min-width: 0;
+}
+.execution-modal .check-label {
+  min-height: 44px;
+  font-size: 0.9rem;
+  gap: 10px;
+}
+.execution-modal .check-label strong {
+  overflow-wrap: anywhere;
+}
+.execution-modal .count-inline > .counter-row {
+  margin: 0;
+  padding: 0;
+  gap: 4px;
+}
+.execution-modal .counter-row > span:first-child {
+  font-size: 0.7rem;
+}
+.execution-modal .count-inline > .field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.execution-modal .count-inline > .field > span {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+.execution-modal .count-inline > .field select {
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+.execution-modal .item-extras {
+  grid-column: 1/-1;
+  padding-top: 0;
+}
+.execution-modal .item-extras > summary {
+  min-height: 40px;
+  font-size: 0.8rem;
+}
+.execution-modal .item-extras .field {
+  margin: 12px 0;
+}
+.execution-modal .checklist-item[aria-invalid='true'] {
+  border-color: #b3362d;
+  outline: 1px solid #b3362d;
+}
+.item-validation {
+  color: #a52c25;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  grid-column: 1/-1;
+  padding: 8px 0;
+}
+.execution-findings > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.85rem;
+  min-height: 44px;
+}
+.execution-footer {
+  flex-shrink: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+.execution-footer .detail-actions {
+  position: static;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+}
+.execution-footer .detail-actions > small {
+  display: block;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+.execution-footer .button-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin: 0;
+}
+.execution-footer .button-row .button {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  font-size: 0.8rem;
+  white-space: normal;
+  line-height: 1.4;
+}
+.execution-footer .button svg {
+  flex-shrink: 0;
+}
+.review-footer > strong {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.execution-footer > .muted {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.execution-modal .image-viewer {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  z-index: 6;
+  padding: 16px;
+  overflow: auto;
+}
+@media (min-width: 768px) {
+  .modal.execution-modal[open] {
+    height: min(880px, 92dvh);
+    max-height: 92dvh;
+  }
+  .execution-modal .modal-head,
+  .execution-toolbar {
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+  .execution-body {
+    padding: 20px 28px;
+  }
+  .execution-footer {
+    padding: 16px 28px;
+  }
+  .execution-footer .button-row {
+    justify-content: flex-end;
+  }
+  .execution-footer .button-row .button {
+    flex: 0 1 auto;
+    min-width: 160px;
+    font-size: 0.875rem;
+  }
+  .execution-modal .checklist-item.count-inline {
+    grid-template-columns: minmax(0, 1fr) 150px 220px;
+    align-items: center;
+  }
+  .execution-modal .count-inline > .field {
+    grid-column: 3;
+    grid-row: 1;
+    display: block;
+  }
+  .execution-modal .count-inline > .field > span {
+    display: none;
+  }
+  .execution-modal .count-inline > .field select {
+    width: 100%;
+  }
+}
+
+/* Mesma escala de leitura nos cartões e no formulário operacional. */
+.service-row strong {
+  font-size: 0.9rem;
+}
+.service-row small {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.model-meta {
+  font-size: 0.8rem;
+}
+.model-card-copy > small {
+  font-size: 0.75rem;
+}
+.execution-modal .required {
+  font-size: 0.7rem;
+}

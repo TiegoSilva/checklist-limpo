@@ -188,7 +188,7 @@ describe('estadia e ordens de serviço', () => {
       <StayAgenda data={data} manager={true} property="" run={vi.fn()} />,
     );
     expect(html).toContain('Editar saída');
-    expect(html).toContain('Checkout programado');
+    expect(html).toContain('Pendente');
     expect(html).toContain('3 diária(s)');
   });
 });

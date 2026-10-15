@@ -43,6 +43,7 @@ import {
   download,
   type Activity,
   type Service,
+  orderStatus,
 } from './domain';
 import { Empty, Form, Modal, Badge } from './components';
 import { enablePush, disablePush } from './lib/push';
@@ -278,6 +279,8 @@ function Portal({ session }: { session: Session }) {
       : 'Sistema';
   const visible = data.activities.filter(
     (a) =>
+      !a.deleted_at &&
+      a.status !== 'cancelled' &&
       (!property ||
         data.units.find((u) => u.id === a.unit_id)?.property_id === property) &&
       `${unitName(a.unit_id)} ${propertyName(a.unit_id)} ${a.title} ${person(a.assignee)}`
@@ -305,15 +308,17 @@ function Portal({ session }: { session: Session }) {
   };
   const daily = visible.filter(inPeriod);
   const myActivities = daily.filter((a) => a.assignee === user);
-  const taskOrders = data.service_orders.filter(
+  const filteredOrders = data.service_orders.filter(
     (s) =>
       !s.deleted_at &&
-      !s.activity_id &&
       (!property ||
         data.units.find((u) => u.id === s.unit_id)?.property_id === property) &&
       `${s.title} ${unitName(s.unit_id)} ${person(s.assignee)}`
         .toLowerCase()
         .includes(search.toLowerCase()),
+  );
+  const taskOrders = filteredOrders.filter(
+    (s) => !s.activity_id && s.status !== 'cancelled',
   );
   const dailyTasks = taskOrders.filter(inPeriod);
   const { activities: approvals, tasks: taskApprovals } = pendingApprovals(
@@ -325,11 +330,15 @@ function Portal({ session }: { session: Session }) {
     : null;
   const counts = {
     pending:
-      visible.filter((a) => a.status === 'pending').length +
-      taskOrders.filter((s) => s.status === 'assigned').length,
-    progress:
-      visible.filter((a) => a.status === 'in_progress').length +
-      taskOrders.filter((s) => s.status === 'in_progress').length,
+      visible.filter(
+        (a) => a.status !== 'cancelled' && orderStatus(a.status) === 'assigned',
+      ).length +
+      taskOrders.filter(
+        (s) => s.status !== 'cancelled' && orderStatus(s.status) === 'assigned',
+      ).length,
+    completed:
+      daily.filter((a) => a.status === 'completed').length +
+      dailyTasks.filter((s) => s.status === 'approved').length,
     review: approvals.length + taskApprovals.length,
     ready: data.units.filter(
       (u) =>
@@ -425,9 +434,9 @@ function Portal({ session }: { session: Session }) {
         )}
         <button className="text-button" onClick={() => setSelected(a.id)}>
           {a.status === 'review'
-            ? a.assignee === user
-              ? 'Ver envio'
-              : 'Revisar'
+            ? manager
+              ? 'Concluir revisão'
+              : 'Ver envio'
             : a.status === 'pending'
               ? 'Iniciar atividade'
               : isDone(a)
@@ -595,46 +604,48 @@ function Portal({ session }: { session: Session }) {
           </div>
         </header>
         <main id="main">
-          <div className="page-intro">
-            <div>
-              <div className="eyebrow">
-                {new Intl.DateTimeFormat('pt-BR', {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long',
-                  timeZone: 'America/Sao_Paulo',
-                }).format(new Date())}
+          {path !== '/checklists' && (
+            <div className="page-intro">
+              <div>
+                <div className="eyebrow">
+                  {new Intl.DateTimeFormat('pt-BR', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                    timeZone: 'America/Sao_Paulo',
+                  }).format(new Date())}
+                </div>
+                <h1>{headTitle}</h1>
+                <p>
+                  {path === '/'
+                    ? `Olá${profile ? ', ' + profile.name.split(' ')[0] : ''}. Cada detalhe pronto para a próxima chegada.`
+                    : path === '/meu-dia'
+                      ? 'Tudo o que você precisa fazer, em um só lugar.'
+                      : path === '/aprovacoes'
+                        ? 'Seu olhar é a última etapa antes de receber bem.'
+                        : 'Organização, clareza e cuidado em cada etapa.'}
+                </p>
               </div>
-              <h1>{headTitle}</h1>
-              <p>
-                {path === '/'
-                  ? `Olá${profile ? ', ' + profile.name.split(' ')[0] : ''}. Cada detalhe pronto para a próxima chegada.`
-                  : path === '/meu-dia'
-                    ? 'Tudo o que você precisa fazer, em um só lugar.'
-                    : path === '/aprovacoes'
-                      ? 'Seu olhar é a última etapa antes de receber bem.'
-                      : 'Organização, clareza e cuidado em cada etapa.'}
-              </p>
+              {manager &&
+                [
+                  '/',
+                  '/atividades',
+                  '/propriedades',
+                  '/servicos',
+                  '/inventario',
+                  '/equipe',
+                  '/checklists',
+                ].includes(path) && (
+                  <button
+                    className="button primary"
+                    onClick={() => open(actionModal)}
+                  >
+                    <Plus size={18} />
+                    {actionLabel}
+                  </button>
+                )}
             </div>
-            {manager &&
-              [
-                '/',
-                '/atividades',
-                '/propriedades',
-                '/servicos',
-                '/inventario',
-                '/equipe',
-                '/checklists',
-              ].includes(path) && (
-                <button
-                  className="button primary"
-                  onClick={() => open(actionModal)}
-                >
-                  <Plus size={18} />
-                  {actionLabel}
-                </button>
-              )}
-          </div>
+          )}
           {session &&
             !query.isPending &&
             !query.error &&
@@ -746,10 +757,10 @@ function Portal({ session }: { session: Session }) {
                     color: 'gold',
                   },
                   {
-                    title: 'Em andamento',
-                    value: counts.progress,
-                    icon: Clock3,
-                    note: 'Cuidado acontecendo agora',
+                    title: 'Concluídas no período',
+                    value: counts.completed,
+                    icon: CheckCheck,
+                    note: 'Revisadas e finalizadas',
                     color: 'blue',
                   },
                   {
@@ -1160,29 +1171,31 @@ function Portal({ session }: { session: Session }) {
               <div className="section-heading">
                 <h2>Ordens de serviço</h2>
                 <span className="count-pill">
-                  {data.service_orders.filter((s) => !s.deleted_at).length}{' '}
+                  {
+                    filteredOrders.filter((s) => s.status !== 'cancelled')
+                      .length
+                  }{' '}
                   ordens
                 </span>
               </div>
-              {data.service_orders
-                .filter((s) => !s.deleted_at)
-                .filter(
-                  (s) =>
-                    (!property ||
-                      data.units.find((u) => u.id === s.unit_id)
-                        ?.property_id === property) &&
-                    `${s.title} ${unitName(s.unit_id)}`
-                      .toLowerCase()
-                      .includes(search.toLowerCase()),
-                )
+              {filteredOrders
+                .filter((s) => s.status !== 'cancelled')
                 .map(orderCard)}
-              {!data.service_orders.some((s) => !s.deleted_at) && (
+              {!filteredOrders.some((s) => s.status !== 'cancelled') && (
                 <Empty
                   title="Nenhuma ordem de serviço"
                   description="Crie ordens com modelos de checklist ou tarefas simples."
                   action={() => open('service')}
                   label="Abrir ordem de serviço"
                 />
+              )}
+              {filteredOrders.some((s) => s.status === 'cancelled') && (
+                <details className="room-section">
+                  <summary>Histórico de ordens canceladas</summary>
+                  {filteredOrders
+                    .filter((s) => s.status === 'cancelled')
+                    .map(orderCard)}
+                </details>
               )}
               {manager && (
                 <DeletedOrders data={data} run={run} property={property} />
@@ -1740,18 +1753,20 @@ function Portal({ session }: { session: Session }) {
               ? approvals
               : visible.filter((a) =>
                   modal === 'stats-0'
-                    ? a.status === 'pending'
+                    ? a.status !== 'cancelled' &&
+                      orderStatus(a.status) === 'assigned'
                     : modal === 'stats-1'
-                      ? a.status === 'in_progress'
+                      ? a.status === 'completed' && inPeriod(a)
                       : false,
                 ),
             modal === 'approval-summary'
               ? taskApprovals
               : taskOrders.filter((s) =>
                   modal === 'stats-0'
-                    ? s.status === 'assigned'
+                    ? s.status !== 'cancelled' &&
+                      orderStatus(s.status) === 'assigned'
                     : modal === 'stats-1'
-                      ? s.status === 'in_progress'
+                      ? s.status === 'approved' && inPeriod(s)
                       : false,
                 ),
           )}

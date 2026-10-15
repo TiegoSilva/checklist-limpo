@@ -75,6 +75,16 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
     if (
+      ['activity_action', 'service_action', 'manage_work_order'].includes(
+        name,
+      ) &&
+      /Autoaprova/i.test(error.message)
+    ) {
+      throw new Error(
+        'Aplique a migração 202610150012_manager_review.sql no Supabase para permitir a revisão da própria execução por gestores.',
+      );
+    }
+    if (
       ['submit_checklist', 'manage_work_order'].includes(name) &&
       error.code === 'PGRST202'
     ) {

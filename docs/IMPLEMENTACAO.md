@@ -27,7 +27,7 @@ Cobertura atual:
 - Submissão exige itens conferidos e evidências.
 - Recebimento da fotografia exige existência do objeto; recibos são imutáveis para usuários.
 - Conflito de revisão impede sobrescrita.
-- Autoaprovação negada mesmo quando executor tem função de gestor.
+- Após a migração 012, administrador/gestor autorizado pode aprovar a própria execução. Executor sem função de gestão continua impedido.
 - Reprovação exige motivo e itens, mantém snapshot e exige nova foto dos itens corrigidos.
 - Ocorrência impeditiva bloqueia aprovação; resolução exige gestor e motivo.
 - Notificações e outbox persistem em transação.

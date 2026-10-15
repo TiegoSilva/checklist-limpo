@@ -28,7 +28,7 @@ Uma única transação cria a hospedagem e **duas ordens vinculadas**:
 
 As duas ordens guardam o check-in de origem e têm respostas e revisões independentes. O checkout guarda a referência à versão de check-in usada para derivar sua lista. Alterar o modelo depois não muda as ordens já criadas. As quantidades por hóspede usam a ocupação desta hospedagem em ambas. Repetir o envio com o mesmo identificador não duplica ordens. Tarefas adicionais podem ser ligadas ao check-in da mesma unidade em **Prioridade e outras opções → Check-in de origem**.
 
-A agenda continua compartilhada com todos os colaboradores autorizados na propriedade, sem expor nomes de hóspedes ou respostas de execução. As ordens com checklist e as tarefas simples aparecem no Meu dia e na agenda de execução; a página Ordens de serviço centraliza ambas. Todas passam por revisão, com aprovação por outro gestor autorizado.
+A agenda continua compartilhada com todos os colaboradores autorizados na propriedade, sem expor nomes de hóspedes ou respostas de execução. As ordens com checklist e as tarefas simples aparecem no Meu dia e na agenda de execução; a página Ordens de serviço centraliza ambas. Todas passam por revisão, com aprovação por administrador ou gestor autorizado, inclusive da própria execução após a migração 012.
 
 ## Prorrogar ou antecipar a saída
 
@@ -52,7 +52,7 @@ A migração `202610150010_named_checklist_models.sql` permite vários modelos n
 
 ## Execução e gestão das ordens (migração 011)
 
-O administrador ou gestor da unidade pode abrir **Gerenciar ordem de serviço** para alterar o status, informando o motivo. Pendente, em execução, em aprovação, aprovada, em correção e cancelada são as opções. Aprovação mantém a conferência das evidências e a exigência de outro gestor; não permite aprovar a própria execução. Reabrir uma ordem preserva a aprovação anterior e inicia uma nova tentativa com as respostas existentes.
+O administrador ou gestor da unidade pode abrir **Gerenciar ordem de serviço** para alterar o status, informando o motivo. As opções exibidas são Pendente, Aguardando aprovação e Concluída. Etapas internas de execução e correção permanecem no histórico. Após a migração 012, o gestor pode revisar a própria execução; evidências e bloqueios continuam validados. Reabrir uma ordem preserva a aprovação anterior e inicia uma nova tentativa com as respostas existentes.
 
 **Excluir ordem** retira a ordem da operação e preserva respostas, fotos e auditoria. Excluir o check-in também exclui o checkout gerado com ele, liberando as datas dessa hospedagem. Tarefas adicionais não são excluídas junto. Em **Ordens de serviço → Ordens excluídas**, o gestor pode restaurar o mesmo par como pendente. A restauração é bloqueada se as datas já estiverem ocupadas por outra hospedagem.
 

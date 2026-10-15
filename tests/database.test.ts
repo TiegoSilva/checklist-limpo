@@ -69,6 +69,14 @@ async function rpc(name: string, args: unknown[] = []) {
   );
   return r.rows[0]?.value;
 }
+async function rollbackAfter(fn: () => Promise<void>) {
+  await db.exec('begin');
+  try {
+    await fn();
+  } finally {
+    await db.exec('rollback');
+  }
+}
 async function receive(
   activity: string,
   item: string,
@@ -263,8 +271,37 @@ describe.sequential('operações reais em PostgreSQL com RLS', () => {
     );
     await action(cleaning, 'submit');
   });
-  it('proíbe autoaprovação mesmo com perfil de gestor', async () => {
-    await expect(action(cleaning, 'approve')).rejects.toThrow(/Autoaprovação/);
+  it('permite ao gestor revisar a própria execução e registra sua autoria', async () => {
+    await rollbackAfter(async () => {
+      await action(cleaning, 'approve');
+      expect(
+        (
+          await db.query<{ approved_by: string; status: string }>(
+            'select approved_by,status from activities where id=$1',
+            [cleaning],
+          )
+        ).rows[0],
+      ).toMatchObject({ approved_by: worker, status: 'completed' });
+      expect(
+        (
+          await db.query<{ reviewer: string }>(
+            'select reviewer from checklist_review_cycles where activity_id=$1 and decision=$2',
+            [cleaning, 'approved'],
+          )
+        ).rows[0].reviewer,
+      ).toBe(worker);
+    });
+  });
+  it('continua impedindo revisão por executor sem função de gestor', async () => {
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      await db.query(
+        "update memberships set roles=array['cleaner','inspector'] where user_id=$1",
+        [worker],
+      );
+      await asUser(worker);
+      await expect(action(cleaning, 'approve')).rejects.toThrow(/gestor/);
+    });
   });
   it('exige justificativa e itens na correção, preservando o snapshot', async () => {
     await asUser(admin);
@@ -336,7 +373,7 @@ describe.sequential('operações reais em PostgreSQL com RLS', () => {
       /permission denied/,
     );
   });
-  it('exige gestor diferente para aprovar ordem de serviço', async () => {
+  it('permite que o gestor executor conclua a revisão da tarefa', async () => {
     const id = (await rpc('service_action', [
       'create',
       JSON.stringify({
@@ -377,9 +414,20 @@ describe.sequential('operações reais em PostgreSQL com RLS', () => {
         note: 'Lâmpada substituída e testada',
       }),
     ]);
-    await expect(
-      rpc('service_action', ['approve', JSON.stringify({ id, revision: 2 })]),
-    ).rejects.toThrow(/não permitida/);
+    await rollbackAfter(async () => {
+      await rpc('service_action', [
+        'approve',
+        JSON.stringify({ id, revision: 2 }),
+      ]);
+      expect(
+        (
+          await db.query<{ reviewer: string }>(
+            'select reviewer from service_orders where id=$1',
+            [id],
+          )
+        ).rows[0].reviewer,
+      ).toBe(worker);
+    });
     await asUser(admin);
     await rpc('service_action', [
       'approve',
@@ -1427,9 +1475,23 @@ describe.sequential('ordens de serviço, modelos e estadia', () => {
         )
       ).rows[0].status,
     ).toBe('review');
-    await expect(action(inActivity, 'approve')).rejects.toThrow(
-      /Autoaprovação/,
-    );
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      await db.query(
+        "update memberships set roles=array['manager','cleaner','inspector'] where user_id=$1 and org_id=$2",
+        [worker, org],
+      );
+      await asUser(worker);
+      await action(inActivity, 'approve');
+      expect(
+        (
+          await db.query<{ approved_by: string }>(
+            'select approved_by from activities where id=$1',
+            [inActivity],
+          )
+        ).rows[0].approved_by,
+      ).toBe(worker);
+    });
     await asUser(admin);
     await action(inActivity, 'approve');
     expect(
@@ -2723,6 +2785,62 @@ describe.sequential('envio único, fotos gerais e gestão das ordens', () => {
     await expect(
       submit(inActivity, checked, crypto.randomUUID(), beforeRevision),
     ).rejects.toThrow(/CONFLICT/);
+    await rollbackAfter(async () => {
+      await expect(
+        rpc('activity_action', [
+          inActivity,
+          (await revision(inActivity)) - 1,
+          'approve',
+          '{}',
+        ]),
+      ).rejects.toThrow(/CONFLICT/);
+    });
+    await expect(action(inActivity, 'approve')).rejects.toThrow(/gestor/);
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      await db.query(
+        "update memberships set roles=array['manager','cleaner','inspector'] where user_id=$1 and org_id=$2",
+        [worker, org],
+      );
+      await asUser(worker);
+      await action(inActivity, 'approve');
+      expect(
+        (
+          await db.query<{ approved_by: string; status: string }>(
+            'select approved_by,status from activities where id=$1',
+            [inActivity],
+          )
+        ).rows[0],
+      ).toMatchObject({ approved_by: worker, status: 'completed' });
+      expect(
+        (
+          await db.query<{ reviewer: string }>(
+            'select reviewer from service_orders where id=$1',
+            [root],
+          )
+        ).rows[0].reviewer,
+      ).toBe(worker);
+    });
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      await db.query(
+        "update memberships set roles=array['manager','cleaner','inspector'] where user_id=$1 and org_id=$2",
+        [worker, org],
+      );
+      await asUser(worker);
+      await manage(root, 'status', {
+        status: 'approved',
+        reason: 'Gestor revisou sua própria execução',
+      });
+      expect(
+        (
+          await db.query<{ reviewer: string }>(
+            'select reviewer from service_orders where id=$1',
+            [root],
+          )
+        ).rows[0].reviewer,
+      ).toBe(worker);
+    });
     await asUser(admin);
     await manage(root, 'status', {
       status: 'approved',
@@ -2999,7 +3117,7 @@ describe.sequential('envio único, fotos gerais e gestão das ordens', () => {
       ).rows,
     ).toHaveLength(9);
   });
-  it('permite gerir também tarefas simples e bloqueia revisão sem evidências ou aprovação pelo próprio executor', async () => {
+  it('permite gerir também tarefas simples e bloqueia revisão sem evidências inclusive do próprio gestor', async () => {
     await asUser(admin);
     const task = (await rpc('create_scheduled_work_order', [
       JSON.stringify({
@@ -3052,8 +3170,8 @@ describe.sequential('envio único, fotos gerais e gestão das ordens', () => {
     await expect(
       manage(own, 'status', {
         status: 'approved',
-        reason: 'Autoaprovação não permitida',
+        reason: 'Concluir tarefa própria sem evidência',
       }),
-    ).rejects.toThrow(/Autoaprovação/);
+    ).rejects.toThrow(/conclusão e a foto/);
   });
 });

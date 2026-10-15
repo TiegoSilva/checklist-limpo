@@ -1,15 +1,9 @@
 import { useState } from 'react';
-import { Camera, Image } from 'lucide-react';
-import { Form, Modal } from './components';
-import {
-  dateTime,
-  dayKey,
-  statusLabels,
-  type Data,
-  type Service,
-} from './domain';
+import { Camera, Image, CheckCheck, Play, Send, X } from 'lucide-react';
+import { Badge, Form, Modal, type ModalFeedback } from './components';
+import { dateTime, dayKey, type Data, type Service } from './domain';
 import { rpc, signedImage, uploadPhoto } from './lib/client';
-import OrderStayContext from './features/OrderStayContext';
+import OrderStayContext, { serviceWindow } from './features/OrderStayContext';
 import OrderManagement from './features/OrderManagement';
 type Run = (fn: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function MemberEditor({
@@ -165,131 +159,298 @@ export function ServiceDetail({
   onClose: () => void;
 }) {
   const [image, setImage] = useState<string>();
+  const [feedback, setFeedback] = useState<ModalFeedback | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(s.completion_note ?? '');
+  const [reason, setReason] = useState('');
+  const [reject, setReject] = useState(false);
+  const act = async (action: string) => {
+    if (action === 'submit' && note.trim().length < 5) {
+      setFeedback({
+        kind: 'error',
+        title: 'Descreva o serviço realizado',
+        message:
+          'Informe pelo menos 5 caracteres. O preenchimento será mantido.',
+        actionLabel: 'Retomar tarefa',
+        onAction: () => setFeedback(null),
+      });
+      return;
+    }
+    if (action === 'reject' && reason.trim().length < 5) {
+      setFeedback({
+        kind: 'error',
+        title: 'Justifique a correção',
+        message: 'Informe pelo menos 5 caracteres.',
+        actionLabel: 'Retomar revisão',
+        onAction: () => setFeedback(null),
+      });
+      return;
+    }
+    setBusy(true);
+    let message = '';
+    try {
+      const ok = await run(async () => {
+        try {
+          return await rpc('service_action', {
+            action,
+            payload: { id: s.id, revision: s.revision, note, reason },
+          });
+        } catch (e) {
+          message =
+            e instanceof Error
+              ? e.message
+              : 'Não foi possível concluir a ação.';
+          throw e;
+        }
+      }, '');
+      if (ok && action === 'start') return;
+      setFeedback(
+        ok
+          ? {
+              kind: 'success',
+              title:
+                action === 'approve'
+                  ? 'Revisão concluída!'
+                  : action === 'reject'
+                    ? 'Correção solicitada'
+                    : 'Enviado para aprovação!',
+              message:
+                action === 'approve'
+                  ? 'A ordem foi concluída.'
+                  : 'A atualização foi confirmada pelo servidor.',
+              actionLabel: 'Concluir atividade',
+              onAction: onClose,
+            }
+          : {
+              kind: 'error',
+              title: 'Não foi possível concluir',
+              message:
+                message || 'Tente novamente. O preenchimento foi mantido.',
+              actionLabel: 'Retomar tarefa',
+              onAction: () => setFeedback(null),
+            },
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const executable =
+    s.assignee === user &&
+    ['assigned', 'rejected', 'in_progress'].includes(s.status);
+  const reviewing = manager && s.status === 'review';
   const photos = data.service_evidence.filter((e) => e.service_id === s.id);
   const stay = data.team_agenda.find((r) => r.id === s.reservation_id);
   const future =
     ['checkin', 'checkout'].includes(s.order_type ?? '') &&
     dayKey(new Date(s.due_at)) > dayKey(new Date());
   return (
-    <Modal title={s.title} onClose={onClose} wide>
-      {manager && <OrderManagement order={s} run={run} onChanged={onClose} />}
-      <div className="detail-top">
-        <span className={`badge status-${s.status}`}>
-          {statusLabels[s.status]}
-        </span>
-        <span>{dateTime(s.due_at)}</span>
-        {s.blocking && <span className="error-text">Impede a liberação</span>}
-      </div>
-      <p className="modal-description">{s.description}</p>
-      <OrderStayContext order={s} data={data} manager={manager} run={run} />
-      {future && (
-        <p className="info-card">
-          Esta ordem estará disponível para execução no dia {dateTime(s.due_at)}
-          .
-        </p>
+    <Modal
+      title={s.title}
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      wide
+      className="checklist-modal execution-modal"
+      feedback={feedback}
+    >
+      {stay && (
+        <div className="execution-toolbar">
+          <div className="stay-facts">
+            <span>
+              <strong>{stay.guests}</strong> hóspedes
+            </span>
+            <span>
+              <strong>{stay.duration_nights}</strong> diária(s)
+            </span>
+          </div>
+        </div>
       )}
-      <p className="info-card">
-        Tarefa simples
-        {s.parent_order_id ? ' · Checkout vinculado à ordem de check-in' : ''}
-        {stay
-          ? ` · ${stay.guests} hóspedes · ${stay.duration_nights} diária(s) · Saída ${stay.checkout}`
-          : ''}
-      </p>
-      {s.completion_note && (
-        <div className="info-card">
-          <p>
-            <strong>Evidência textual:</strong> {s.completion_note}
+      <div className="execution-body">
+        <div className="detail-top">
+          <Badge status={s.status} />
+          <span>
+            {data.profiles.find((p) => p.id === s.assignee)?.name ??
+              'Responsável'}
+          </span>
+          {s.blocking && <span className="error-text">Impede a liberação</span>}
+        </div>
+        <p className="execution-schedule">{serviceWindow(s)}</p>
+        <details className="execution-more">
+          <summary>Detalhes da tarefa e da estadia</summary>
+          {s.description && (
+            <p className="modal-description">{s.description}</p>
+          )}
+          {stay && (
+            <p className="muted">
+              Estadia:{' '}
+              {new Date(`${stay.checkin}T12:00:00`).toLocaleDateString('pt-BR')}{' '}
+              a{' '}
+              {new Date(`${stay.checkout}T12:00:00`).toLocaleDateString(
+                'pt-BR',
+              )}
+            </p>
+          )}
+          {s.order_type !== 'checkin' &&
+            (s.checkin_order_id || s.parent_order_id) && (
+              <p className="muted">
+                Check-in de origem #
+                {(s.checkin_order_id ?? s.parent_order_id)!.slice(0, 8)}
+              </p>
+            )}
+        </details>
+        <OrderStayContext
+          order={s}
+          data={data}
+          manager={manager}
+          run={run}
+          showSummary={false}
+        />
+        {future && (
+          <p className="info-card">
+            Esta ordem estará disponível para execução no dia{' '}
+            {dateTime(s.due_at)}.
           </p>
+        )}
+        {s.completion_note && (
+          <div className="info-card">
+            <p>
+              <strong>Evidência textual:</strong> {s.completion_note}
+            </p>
+          </div>
+        )}
+        <div className="button-row">
+          {photos.map((p, i) => (
+            <button
+              key={p.id}
+              className="button secondary"
+              onClick={() =>
+                void run(
+                  async () =>
+                    setImage(await signedImage('service-evidence', p.path)),
+                  '',
+                )
+              }
+            >
+              <Image size={16} />
+              Foto {i + 1} · {dateTime(p.received_at)}
+            </button>
+          ))}
         </div>
-      )}
-      <div className="button-row">
-        {photos.map((p, i) => (
-          <button
-            key={p.id}
-            className="button secondary"
-            onClick={() =>
-              void run(
-                async () =>
-                  setImage(await signedImage('service-evidence', p.path)),
-                'Fotografia aberta.',
-              )
-            }
-          >
-            <Image size={16} />
-            Foto {i + 1} · {dateTime(p.received_at)}
-          </button>
-        ))}
+        {image && (
+          <div className="image-viewer">
+            <button
+              className="button secondary"
+              onClick={() => setImage(undefined)}
+            >
+              <X size={18} />
+              Fechar fotografia
+            </button>
+            <img src={image} alt="Evidência da ordem de serviço" />
+          </div>
+        )}
+        {s.assignee === user && s.status === 'in_progress' && (
+          <label className="button secondary file-button">
+            <Camera size={17} />
+            Anexar evidência fotográfica
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f)
+                  await run(
+                    () => uploadPhoto('service', s.id, f),
+                    'Foto recebida e verificada pelo servidor.',
+                  );
+                e.target.value = '';
+              }}
+            />
+          </label>
+        )}
+        {executable && s.status === 'in_progress' && (
+          <label className="field">
+            <span>Serviço realizado</span>
+            <textarea
+              value={note}
+              disabled={busy}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Descreva o que foi feito"
+            />
+          </label>
+        )}
+        {reviewing && reject && (
+          <label className="field">
+            <span>O que precisa ser corrigido?</span>
+            <textarea
+              disabled={busy}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <button
+              className="button secondary"
+              disabled={busy}
+              onClick={() => void act('reject')}
+            >
+              Devolver para correção
+            </button>
+          </label>
+        )}
+        {manager && <OrderManagement order={s} run={run} onChanged={onClose} />}
       </div>
-      {image && (
-        <div className="image-viewer">
-          <img src={image} alt="Evidência da ordem de serviço" />
-        </div>
-      )}
-      {s.assignee === user && s.status === 'in_progress' && (
-        <label className="button secondary file-button">
-          <Camera size={17} />
-          Anexar evidência fotográfica
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (f)
-                await run(
-                  () => uploadPhoto('service', s.id, f),
-                  'Foto recebida e verificada pelo servidor.',
-                );
-              e.target.value = '';
-            }}
-          />
-        </label>
-      )}
-      <Form
-        fields={[
-          {
-            name: 'action',
-            label: 'Próxima ação',
-            options: [
-              ...(s.assignee === user && !future
-                ? ['assigned', 'rejected'].includes(s.status)
-                  ? [{ value: 'start', label: 'Iniciar execução' }]
-                  : s.status === 'in_progress'
-                    ? [{ value: 'submit', label: 'Enviar para revisão' }]
-                    : []
-                : []),
-              ...(manager && s.assignee !== user && s.status === 'review'
-                ? [
-                    { value: 'approve', label: 'Aprovar conclusão' },
-                    { value: 'reject', label: 'Solicitar correção' },
-                  ]
-                : []),
-            ],
-          },
-          {
-            name: 'note',
-            label: 'Descrição do serviço realizado',
-            type: 'textarea',
-            required: false,
-          },
-          {
-            name: 'reason',
-            label: 'Justificativa da correção',
-            type: 'textarea',
-            required: false,
-          },
-        ]}
-        onSubmit={async (v) => {
-          if (
-            await run(() =>
-              rpc('service_action', {
-                action: v.action,
-                payload: { ...v, id: s.id, revision: s.revision },
-              }),
-            )
-          )
-            onClose();
-        }}
-      />
+      <footer className="execution-footer">
+        {executable &&
+          !future &&
+          (s.status === 'in_progress' ? (
+            <button
+              className="button primary full"
+              disabled={busy}
+              onClick={() => void act('submit')}
+            >
+              <Send size={18} />
+              Enviar para aprovação
+            </button>
+          ) : (
+            <button
+              className="button primary full"
+              disabled={busy}
+              onClick={() => void act('start')}
+            >
+              <Play size={18} />
+              Iniciar tarefa
+            </button>
+          ))}
+        {reviewing && (
+          <div className="review-footer">
+            <strong>Revisão da tarefa</strong>
+            <div className="button-row">
+              {!reject && (
+                <>
+                  <button
+                    className="button primary"
+                    disabled={busy}
+                    onClick={() => void act('approve')}
+                  >
+                    <CheckCheck size={18} />
+                    Concluir revisão
+                  </button>
+                </>
+              )}
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={() => setReject(!reject)}
+              >
+                {reject ? 'Cancelar correção' : 'Solicitar correção'}
+              </button>
+            </div>
+          </div>
+        )}
+        {!reviewing && (!executable || future) && (
+          <button className="button secondary full" onClick={onClose}>
+            Fechar
+          </button>
+        )}
+      </footer>
     </Modal>
   );
 }

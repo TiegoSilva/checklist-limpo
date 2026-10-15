@@ -28,12 +28,12 @@ npm.cmd run build
 4. Entre na plataforma e use **Criar organização**. A primeira conta recebe os perfis administrativos dessa organização.
 5. Cadastre empreendimentos, unidades, ambientes e inventário. Os nomes do briefing, como Refúgio Casinha Branca e Barra Concept Suites, são cadastrados pela interface; não são imóveis fixos no código.
 6. Crie ou convide as demais contas no Supabase Auth. Em **Equipe e acessos**, atribua suas funções e propriedades autorizadas.
-7. Em **Configurar checklists**, cadastre os itens com nome e quantidade. Esses itens são compartilhados entre os dois tipos da unidade; salvar o primeiro padrão com itens cria o correspondente quando necessário. Cadastre tarefas de limpeza na seção separada, use **Ver prévia** e **Salvar alterações** para editar os padrões. Importe o inventário quando apropriado. Configure fotos obrigatórias, respostas técnicas e faixas de ocupação nas opções de cada item.
-8. Use **Confirmar checkout**, escolhendo responsáveis com funções de vistoriador e limpeza. Contas com funções gerenciais não recebem automaticamente essas duas funções operacionais.
-9. Execute com a conta atribuída, envie as fotos, confirme cada item e envie o progresso. O envio final valida novamente os dados no banco.
-10. Entre com **outra conta gerencial autorizada** para revisar e liberar. O executor, inclusive alguém que executou antes de uma reatribuição, não pode aprovar.
+7. Em **Modelos de checklist**, use o catálogo para criar, editar, duplicar, visualizar ou remover modelos. Todos os itens ficam na mesma lista; escolha o tipo em **Opções**.
+8. Crie uma **ordem de check-in**, informando unidade, hóspede, hóspedes e diárias. O checkout é criado automaticamente a partir do check-in. Uma tarefa simples usa somente os campos necessários.
+9. Execute com a conta atribuída. Quantidades começam com o esperado; marque o item ou ajuste quantidade/condição para conferi-lo. Fotos ficam no campo único. O rascunho é salvo automaticamente; use **Enviar para aprovação** ao terminar.
+10. Em **Aguardando aprovação**, um administrador ou gestor autorizado usa **Concluir revisão**. Com a migração 012, pode revisar também a própria execução. Itens, fotos, bloqueios e autoria continuam validados no servidor.
 
-O responsável pela vistoria pode ser o mesmo da limpeza. O aprovador precisa ser outra pessoa. Não reutilize a conta do gestor para simular um colaborador em produção.
+Os status operacionais exibidos são **Pendente**, **Aguardando aprovação** e **Concluída**. Etapas internas e histórico de correção continuam preservados. Veja [o fluxo de revisão](docs/REVISAO_E_EXECUCAO.md).
 
 ### Variáveis
 
@@ -122,3 +122,5 @@ A migração `202610150009_checkin_execution_windows.sql` simplifica a programa�
 Modelos com nomes próprios e duplicação entre unidades: aplique uma vez `supabase/migrations/202610150010_named_checklist_models.sql` após a 009. Na criação de OS, escolha Check-in ou Tarefa; o modelo é escolhido dentro do Check-in. Consulte [Modelos e ordens](docs/MODELOS_E_ORDENS.md).
 
 Execução simplificada, fotos gerais (até 8), envio com retomada e gestão de status/exclusão: aplique uma vez `supabase/migrations/202610150011_execution_and_order_management.sql` após a 010. Publique o frontend e a API de evidências juntos. Detalhes em [Modelos e ordens](docs/MODELOS_E_ORDENS.md).
+
+Para ativar a aprovação da própria execução por gestores, aplique uma vez `supabase/migrations/202610150012_manager_review.sql`, depois da 011. A migração não foi aplicada no projeto remoto nesta entrega.

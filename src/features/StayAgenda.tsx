@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Modal } from '../components';
+import { Badge, Form, Modal } from '../components';
 import { dayKey, type AgendaEntry, type Data } from '../domain';
 import { rpc } from '../lib/client';
 
@@ -101,19 +101,17 @@ export default function StayAgenda({
                     {r.checkout_time.slice(0, 5)}
                   </small>
                 </div>
-                <span className="muted">
-                  {!r.cycle_id && !r.checkout_order_id
-                    ? 'Reserva anterior'
-                    : (
-                          r.checkout_order_id
-                            ? r.inspection_status === 'completed'
-                            : r.cleaning_status === 'completed'
-                        )
-                      ? 'Concluída'
-                      : r.inspection_status === 'pending' || !r.cycle_id
-                        ? 'Checkout programado'
-                        : 'Em execução'}
-                </span>
+                {!r.cycle_id && !r.checkout_order_id ? (
+                  <span className="muted">Reserva anterior</span>
+                ) : (
+                  <Badge
+                    status={
+                      (r.checkout_order_id
+                        ? r.inspection_status
+                        : r.cleaning_status) ?? 'pending'
+                    }
+                  />
+                )}
                 {manager && canEdit && (
                   <button
                     className="button secondary"
