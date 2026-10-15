@@ -1753,3 +1753,203 @@ describe.sequential('ordens de serviço, modelos e estadia', () => {
     await asUser(admin);
   });
 });
+
+describe.sequential('remoção e restauração de modelos', () => {
+  let archiveUnit: string, first: string, latest: string, activity: string;
+  it('remove todas as versões do modelo, preservando ordens, snapshots e o par ativo', async () => {
+    await asUser(admin);
+    archiveUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Modelos removíveis',
+        capacity: 4,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    first = (await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: archiveUnit,
+        kind: 'cleaning',
+        items: [sharedTowel],
+      }),
+    ])) as string;
+    const id = await rpc('create_work_order', [
+      JSON.stringify({
+        event_id: '00000000-0000-4000-8000-000000000101',
+        unit_id: archiveUnit,
+        order_type: 'general',
+        execution_mode: 'checklist',
+        template_id: first,
+        title: 'Ordem preservada',
+        assignee: worker,
+        due_at: '2020-01-01T12:00:00Z',
+      }),
+    ]);
+    activity = (
+      await db.query<{ activity_id: string }>(
+        'select activity_id from service_orders where id=$1',
+        [id],
+      )
+    ).rows[0].activity_id;
+    latest = (await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: archiveUnit,
+        kind: 'cleaning',
+        items: [{ ...sharedTowel, title: 'Toalhas novas' }],
+      }),
+    ])) as string;
+    await rpc('set_checklist_archived', [latest, true]);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where unit_id=$1 and kind=$2 and archived_at is null',
+          [archiveUnit, 'cleaning'],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where unit_id=$1 and kind=$2 and archived_at is null',
+          [archiveUnit, 'inspection'],
+        )
+      ).rows.length,
+    ).toBeGreaterThan(0);
+    const a = (
+      await db.query<{ template_id: string; items: { title: string }[] }>(
+        'select * from activities where id=$1',
+        [activity],
+      )
+    ).rows[0];
+    expect(a.template_id).toBe(first);
+    expect(a.items[0].title).toBe('Toalhas');
+    await expect(
+      rpc('create_work_order', [
+        JSON.stringify({
+          unit_id: archiveUnit,
+          order_type: 'general',
+          execution_mode: 'checklist',
+          template_id: first,
+          title: 'Não pode usar removido',
+          assignee: worker,
+          due_at: '2020-01-01T12:00:00Z',
+        }),
+      ]),
+    ).rejects.toThrow(/modelo foi removido/);
+  });
+  it('permite concluir uma execução existente mesmo com o modelo removido', async () => {
+    await asUser(worker);
+    await action(activity, 'start');
+    await action(activity, 'save', {
+      responses: {
+        'towel-shared': { confirmed: true, found: 2, condition: 'ok' },
+      },
+    });
+    await action(activity, 'submit');
+    await asUser(admin);
+    await action(activity, 'approve');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from activities where id=$1',
+          [activity],
+        )
+      ).rows[0].status,
+    ).toBe('completed');
+  });
+  it('exige gestão da propriedade e versão atual para remover ou restaurar', async () => {
+    await asUser(outsider);
+    await expect(
+      rpc('set_checklist_archived', [latest, false]),
+    ).rejects.toThrow(/Acesso negado/);
+    await asUser(admin);
+    await expect(rpc('set_checklist_archived', [first, false])).rejects.toThrow(
+      /modelo mudou/,
+    );
+    await expect(
+      db.query(
+        'update checklist_template_versions set archived_at=null where id=$1',
+        [latest],
+      ),
+    ).rejects.toThrow(/permission denied/);
+    await rpc('set_checklist_archived', [latest, false]);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where unit_id=$1 and kind=$2 and archived_at is not null',
+          [archiveUnit, 'cleaning'],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query(
+          'select id from audit_events where resource_id=$1 and event=$2',
+          [latest, 'checklist.restored'],
+        )
+      ).rows,
+    ).toHaveLength(1);
+  });
+  it('não restaura o modelo removido ao sincronizar itens editados no par', async () => {
+    await rpc('set_checklist_archived', [latest, true]);
+    await rpc('configure', [
+      'template',
+      JSON.stringify({
+        unit_id: archiveUnit,
+        kind: 'inspection',
+        items: [{ ...sharedTowel, expected: 3, title: 'Toalhas atualizadas' }],
+      }),
+    ]);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_template_versions where unit_id=$1 and kind=$2 and archived_at is null',
+          [archiveUnit, 'cleaning'],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    latest = (
+      await db.query<{ id: string }>(
+        'select id from checklist_template_versions where unit_id=$1 and kind=$2 order by version desc limit 1',
+        [archiveUnit, 'cleaning'],
+      )
+    ).rows[0].id;
+    await expect(
+      rpc('save_checklist', [
+        JSON.stringify({
+          unit_id: archiveUnit,
+          kind: 'cleaning',
+          base_template_id: latest,
+          items: [sharedTowel],
+        }),
+      ]),
+    ).rejects.toThrow(/Modelo removido/);
+    const newId = await rpc('save_checklist', [
+      JSON.stringify({
+        unit_id: archiveUnit,
+        kind: 'cleaning',
+        base_template_id: null,
+        items: [sharedTowel],
+      }),
+    ]);
+    expect(
+      (
+        await db.query<{ archived_at: string | null }>(
+          'select archived_at from checklist_template_versions where id=$1',
+          [newId],
+        )
+      ).rows[0].archived_at,
+    ).toBeNull();
+    expect(
+      (
+        await db.query<{ archived_at: string | null }>(
+          'select archived_at from checklist_template_versions where id=$1',
+          [latest],
+        )
+      ).rows[0].archived_at,
+    ).toBeTruthy();
+  });
+});

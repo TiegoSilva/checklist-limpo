@@ -133,7 +133,12 @@ export default function ActivityDetail({
   const cycle = data.preparation_cycles.find((c) => c.id === a.cycle_id);
   const stay = data.stays.find((s) => s.id === cycle?.stay_id);
   return (
-    <Modal title={`${unitName(a.unit_id)} · ${a.title}`} onClose={onClose} wide>
+    <Modal
+      title={`${unitName(a.unit_id)} · ${a.title}`}
+      onClose={onClose}
+      wide
+      className="checklist-modal"
+    >
       {order && (
         <p className="info-card">
           Ordem de serviço · Modelo v{model?.version ?? '—'}

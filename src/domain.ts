@@ -192,6 +192,8 @@ export type Data = {
     version: number;
     items: Item[];
     publication_source?: 'user' | 'migration';
+    archived_at?: string | null;
+    archived_by?: string | null;
   }[];
   environments: { id: string; unit_id: string; name: string }[];
   stays: {

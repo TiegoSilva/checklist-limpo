@@ -11,7 +11,11 @@ Os modelos atuais são configurados por unidade para check-in e checkout. Seus i
 
 ## Hospedagem
 
-Em **Nova ordem de serviço**, escolha **Check-in com checkout automático**. Informe a unidade, o formato de execução, o responsável pelo check-in, o hóspede, a entrada, a duração em diárias e a quantidade de hóspedes. Na mesma tela escolha o formato, o modelo quando aplicável e o responsável do checkout. A saída é calculada automaticamente: entrada + diárias. Os horários padrão são 14h na entrada e 12h na saída, editáveis em **Horários**.
+Em **Nova ordem de serviço**, o formulário segue quatro passos: **Tipo → Detalhes → Programação → Revisão**. Escolha **Check-in**, **Tarefa** ou **Checklist**. Os campos mudam conforme a escolha; voltar a um passo mantém os dados preenchidos enquanto o formulário estiver aberto.
+
+Para **Check-in**, informe unidade, hóspede, entrada, diárias e quantidade de hóspedes. A saída é calculada automaticamente: entrada + diárias. Em Programação, escolha os responsáveis pela entrada e saída. Os modelos ativos da unidade são escolhidos automaticamente; se não houver modelo, a ordem correspondente usa tarefa simples. **Ajustar modelos e horários** permite mudar esse padrão e incluir observações. Os horários iniciais são 14h na entrada e 12h na saída. Confira o resumo e use **Criar as duas ordens**.
+
+Para **Tarefa**, informe a unidade e o trabalho a realizar, depois responsável e prazo. Instruções, prioridade, bloqueio da unidade e vínculo com ocorrência ficam nas opções adicionais. Para **Checklist**, selecione o modelo ativo e a ocupação; o título é gerado a partir do modelo, sem pedir a mesma informação novamente.
 
 Uma única transação cria a hospedagem e **duas ordens vinculadas**:
 
@@ -33,5 +37,7 @@ O sistema bloqueia datas sobrepostas, duração inválida, ocupação acima da c
 Se as migrações 001 a 006 já foram aplicadas, execute uma vez `supabase/migrations/202610140007_work_orders.sql` no SQL Editor. Se a 006 ainda estiver pendente, execute primeiro a 006 e depois a 007. Em projeto novo, aplique todas na ordem dos nomes. Não reaplique migrações anteriores.
 
 A migração preserva ordens, atividades e auditorias antigas. As ordens existentes continuam como tarefas simples; os fluxos anteriores de reservas/atividades permanecem disponíveis para compatibilidade. Não são fabricadas ordens retroativas ou alteradas datas antigas. A nova organização vale para ordens criadas pelo novo formulário.
+
+Para remover e restaurar modelos, aplique também a migração 008 e consulte [a atualização de interface e remoção](INTERFACE_MOBILE.md).
 
 Não foi aplicada migração no projeto remoto nesta entrega. A integração real com Supabase Auth, Storage, Realtime e Vercel depende da configuração externa. Os testes locais executam as funções e políticas reais em PostgreSQL e verificam os dois formatos, os vínculos, as quantidades, as versões, os cálculos de calendário, a revisão e a edição da saída após concluir o check-in.

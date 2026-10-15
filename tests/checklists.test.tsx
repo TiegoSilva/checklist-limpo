@@ -4,7 +4,7 @@ import { emptyData, selectItems, type Item } from '../src/domain';
 import ChecklistCatalog from '../src/features/ChecklistCatalog';
 import { ChecklistPreview } from '../src/features/ChecklistPreview';
 import TemplateEditor from '../src/features/TemplateEditor';
-import { latestTemplates } from '../src/features/checklists';
+import { latestTemplates, activeTemplates } from '../src/features/checklists';
 
 const towel: Item = {
   id: 'towel',
@@ -70,7 +70,8 @@ describe('configuração e prévia de checklists', () => {
         onCreate={vi.fn()}
       />,
     );
-    expect(html.match(/Editar modelo/g)).toHaveLength(2);
+    expect(html.match(/title="Editar modelo"/g)).toHaveLength(2);
+    expect(html.match(/title="Remover modelo"/g)).toHaveLength(2);
     expect(html.match(/Ver prévia/g)).toHaveLength(3);
     expect(html).toContain('Versões anteriores (1)');
   });
@@ -117,4 +118,24 @@ describe('configuração e prévia de checklists', () => {
     expect(items[0].expected).toBe(4);
     expect(selectItems(items, 2)).toHaveLength(1);
   });
+});
+
+it('não oferece versões removidas como modelo ativo, mas mantém a versão para o histórico', () => {
+  const templates = data.checklist_template_versions.map((t) => ({
+    ...t,
+    archived_at: t.kind === 'cleaning' ? '2026-10-15' : null,
+  }));
+  expect(activeTemplates(templates).map((t) => t.id)).toEqual(['inspection']);
+  expect(latestTemplates(templates).map((t) => t.id)).toContain('current');
+  const html = renderToStaticMarkup(
+    <ChecklistCatalog
+      data={{ ...data, checklist_template_versions: templates }}
+      onEdit={vi.fn()}
+      onPreview={vi.fn()}
+      onCreate={vi.fn()}
+      run={vi.fn()}
+    />,
+  );
+  expect(html).toContain('Modelos removidos (1)');
+  expect(html).toContain('Restaurar');
 });

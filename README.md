@@ -114,3 +114,5 @@ Para atualizar um banco já instalado, consulte [Edição, itens compartilhados 
 A migração `202610140006_stay_agenda.sql` estabeleceu a agenda compartilhada por propriedade e a edição da saída. Ela é pré-requisito para a organização em ordens de serviço descrita abaixo. Veja [o guia da agenda](docs/AGENDA_CHECKOUT.md).
 
 Com a migração `202610140007_work_orders.sql`, cada checklist é um **modelo** e cada ordem executa uma versão desse modelo ou uma tarefa simples. Criar uma ordem de check-in informa **diárias e hóspedes** e cria uma ordem de checkout vinculada. Alterar a saída move apenas o checkout, preservando o check-in concluído. Consulte [Modelos e ordens de serviço](docs/MODELOS_E_ORDENS.md) para ativar e usar o novo fluxo.
+
+A interface prioriza celular, com checks circulares, itens e quantidades em linha e criação de ordens em quatro passos condicionais. A migração `202610150008_archive_checklists.sql` adiciona **remoção e restauração de modelos**, preservando o histórico e bloqueando novas execuções de modelos removidos. Veja [Interface mobile e remoção de modelos](docs/INTERFACE_MOBILE.md) para atualizar o Supabase.

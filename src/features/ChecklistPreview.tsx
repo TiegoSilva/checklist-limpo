@@ -212,7 +212,12 @@ export default function ChecklistPreviewDialog({
   onClose: () => void;
 }) {
   return (
-    <Modal title="Visualizar checklist" onClose={onClose} wide>
+    <Modal
+      title="Visualizar checklist"
+      onClose={onClose}
+      wide
+      className="checklist-modal"
+    >
       <ChecklistPreview
         items={template.items}
         unit={unit}

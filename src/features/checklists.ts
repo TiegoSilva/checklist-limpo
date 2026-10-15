@@ -13,3 +13,6 @@ export const checklistLabel = (kind: string) =>
   kind === 'inspection'
     ? 'Vistoria de checkout'
     : 'Limpeza, arrumação e check-in';
+
+export const activeTemplates = (templates: Template[]) =>
+  latestTemplates(templates).filter((t) => !t.archived_at);

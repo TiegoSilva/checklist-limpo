@@ -14,7 +14,7 @@ import { type Data, type Item } from '../domain';
 import { supabase, rpc, type Run } from '../lib/client';
 import QuantityStepper from './QuantityStepper';
 import { ChecklistPreview } from './ChecklistPreview';
-import { checklistLabel, latestTemplates } from './checklists';
+import { checklistLabel, activeTemplates } from './checklists';
 
 export default function TemplateEditor({
   data,
@@ -30,7 +30,7 @@ export default function TemplateEditor({
   const existing = data.checklist_template_versions.find(
     (t) => t.id === templateId,
   );
-  const latest = latestTemplates(data.checklist_template_versions);
+  const latest = activeTemplates(data.checklist_template_versions);
   const initialUnit =
     existing?.unit_id ?? (data.units.length === 1 ? data.units[0].id : '');
   const initialKind = existing?.kind ?? 'cleaning';
@@ -342,6 +342,7 @@ export default function TemplateEditor({
       }
       onClose={onClose}
       wide
+      className="checklist-modal"
     >
       <div className="editor-tabs">
         <button

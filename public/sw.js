@@ -1,4 +1,4 @@
-const CACHE = 'aja-shell-v6';
+const CACHE = 'aja-shell-v7';
 self.addEventListener('install', (event) =>
   event.waitUntil(
     caches

@@ -73,6 +73,11 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (name === 'set_checklist_archived' && error.code === 'PGRST202') {
+      throw new Error(
+        'Aplique a migração 202610150008_archive_checklists.sql no Supabase para remover e restaurar modelos.',
+      );
+    }
     if (name === 'create_work_order' && error.code === 'PGRST202') {
       throw new Error(
         'Aplique a migração 202610140007_work_orders.sql no Supabase para ativar as ordens com modelos e o checkout vinculado.',

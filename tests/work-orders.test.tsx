@@ -2,6 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import WorkOrderEditor, {
   departureDate,
+  buildOrderPayload,
+  initialOrderDraft,
+  orderStepError,
+  orderPlan,
 } from '../src/features/WorkOrderEditor';
 import { emptyData } from '../src/domain';
 import StayAgenda from '../src/features/StayAgenda';
@@ -17,7 +21,7 @@ describe('estadia e ordens de serviço', () => {
       expect(departureDate(arrival, nights)).toBe(expected);
     },
   );
-  it('pede duração, hóspedes e formato de execução das duas ordens', () => {
+  it('mostra somente os detalhes da estadia no segundo passo', () => {
     const html = renderToStaticMarkup(
       <WorkOrderEditor
         data={emptyData}
@@ -26,12 +30,101 @@ describe('estadia e ordens de serviço', () => {
         initialType="checkin"
       />,
     );
-    expect(html).toContain('Duração da estadia (diárias)');
+    expect(html).toContain('Passo 2 de 4');
+    expect(html).toContain('Data de entrada');
+    expect(html).toContain('Diárias da estadia');
     expect(html).toContain('Quantidade de hóspedes');
-    expect(html).toContain('Checkout automático');
-    expect(html).toContain('Tarefa simples de checkout');
-    expect(html).toContain('Criar check-in e checkout');
-    expect(html).not.toContain('name="checkout"');
+    expect(html).not.toContain('Responsável pelo checkout');
+    expect(html).not.toContain('Data e horário do prazo');
+  });
+  it('começa com uma escolha de tipo, sem exibir campos redundantes', () => {
+    const html = renderToStaticMarkup(
+      <WorkOrderEditor data={emptyData} run={vi.fn()} onClose={vi.fn()} />,
+    );
+    expect(html).toContain('O que vamos organizar?');
+    expect(html).toContain('name="order-intent"');
+    expect(html).not.toContain('datetime-local');
+    expect(html).not.toContain('Nome do hóspede');
+  });
+  it('mantém o payload completo independentemente dos campos desmontados entre passos', () => {
+    const data = {
+      ...emptyData,
+      units: [
+        {
+          id: 'u',
+          property_id: 'p',
+          name: 'Teste',
+          capacity: 4,
+          base_occupancy: 2,
+          operational_status: 'ready',
+          commercially_available: false,
+        },
+      ],
+      profiles: [
+        { id: 'person', name: 'Equipe', active: true, font_scale: 100 },
+      ],
+      memberships: [
+        {
+          org_id: 'org',
+          user_id: 'person',
+          roles: ['cleaner', 'inspector'] as ('cleaner' | 'inspector')[],
+        },
+      ],
+    };
+    const d = {
+      ...initialOrderDraft(data, 'checkin'),
+      title: 'Ana',
+      arrival: '2026-12-31',
+      nights: 3,
+      guests: 2,
+      description: 'Chegada ao fim da tarde',
+    };
+    expect(orderStepError(data, d, 1)).toBe('');
+    expect(orderStepError(data, d, 2)).toBe('');
+    expect(buildOrderPayload(data, d, 'event')).toMatchObject({
+      guest_name: 'Ana',
+      checkin: '2026-12-31',
+      duration_nights: 3,
+      guests: 2,
+      assignee: 'person',
+      checkout_assignee: 'person',
+      execution_mode: 'task',
+      checkout_execution_mode: 'task',
+      description: 'Chegada ao fim da tarde',
+    });
+    const task = {
+      ...d,
+      intent: 'task' as const,
+      title: 'Trocar lâmpada',
+      due: '2026-10-15T12:00',
+    };
+    const payload = buildOrderPayload(data, task, 'task');
+    expect(payload).toMatchObject({
+      title: 'Trocar lâmpada',
+      order_type: 'general',
+      execution_mode: 'task',
+    });
+    expect(payload).not.toHaveProperty('duration_nights');
+    expect(orderStepError(data, { ...d, guests: 5 }, 1)).toContain('até 4');
+    expect(orderStepError(data, { ...task, due: '' }, 2)).toContain('prazo');
+    expect(
+      orderPlan(
+        {
+          ...data,
+          checklist_template_versions: [
+            {
+              id: 'removed',
+              unit_id: 'u',
+              kind: 'cleaning',
+              version: 1,
+              items: [],
+              archived_at: '2026-10-15',
+            },
+          ],
+        },
+        d,
+      ).model,
+    ).toBeUndefined();
   });
   it('permite editar a saída com check-in concluído enquanto checkout está pendente', () => {
     const data = {

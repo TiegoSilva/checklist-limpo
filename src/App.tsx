@@ -1263,6 +1263,7 @@ function Portal({ session }: { session: Session }) {
           )}
           {path === '/checklists' && (
             <ChecklistCatalog
+              run={run}
               data={data}
               onCreate={() => open('template')}
               onEdit={(id) => {
