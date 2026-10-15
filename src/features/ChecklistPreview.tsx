@@ -5,6 +5,7 @@ import { selectItems, type Item, type Unit } from '../domain';
 import { signedImage } from '../lib/client';
 import QuantityStepper from './QuantityStepper';
 import { checklistLabel, type Template } from './checklists';
+import { itemResponse } from './execution';
 
 export function ChecklistPreview({
   items,
@@ -22,6 +23,7 @@ export function ChecklistPreview({
   const [occupancy, setOccupancy] = useState(unit?.base_occupancy ?? 1);
   const [confirmed, setConfirmed] = useState<string[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [conditions, setConditions] = useState<Record<string, string>>({});
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [photo, setPhoto] = useState<{ url: string; title: string }>();
   const [error, setError] = useState('');
@@ -57,6 +59,7 @@ export function ChecklistPreview({
               setOccupancy(next);
               setConfirmed([]);
               setCounts({});
+              setConditions({});
               setAnswers({});
             }}
           />
@@ -106,7 +109,7 @@ export function ChecklistPreview({
                       <span className="sr-only">Quantidade encontrada</span>
                       <QuantityStepper
                         label={`Quantidade encontrada de ${i.title}`}
-                        value={counts[i.id] ?? 0}
+                        value={counts[i.id] ?? i.expected ?? 0}
                         onChange={(n) =>
                           setCounts((prev) => ({ ...prev, [i.id]: n }))
                         }
@@ -120,11 +123,35 @@ export function ChecklistPreview({
                       )}
                   </div>
                 )}
+                {i.mode === 'count' && (
+                  <label className="field">
+                    <span>Condição</span>
+                    <select
+                      value={
+                        itemResponse(i, {
+                          confirmed: confirmed.includes(i.id),
+                          found: counts[i.id] ?? i.expected ?? 0,
+                          condition: conditions[i.id],
+                        }).condition
+                      }
+                      onChange={(e) =>
+                        setConditions((prev) => ({
+                          ...prev,
+                          [i.id]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="ok">Conforme</option>
+                      <option value="damaged">Danificado</option>
+                      <option value="divergent">Quantidade divergente</option>
+                    </select>
+                  </label>
+                )}
                 {i.mode === 'technical' && (
                   <label className="field">
                     <span>Conferência técnica</span>
                     <select
-                      value={answers[i.id] ?? ''}
+                      value={answers[i.id] ?? 'ok'}
                       onChange={(e) =>
                         setAnswers((prev) => ({
                           ...prev,
@@ -132,7 +159,6 @@ export function ChecklistPreview({
                         }))
                       }
                     >
-                      <option value="">Selecione</option>
                       <option value="ok">Conforme</option>
                       <option value="issue">Não conforme</option>
                       {i.allow_na && <option value="na">Não se aplica</option>}
@@ -165,12 +191,6 @@ export function ChecklistPreview({
                       Ver foto de referência
                     </button>
                   )}
-                  {i.evidence_required && (
-                    <span className="preview-evidence">
-                      <Camera size={16} />
-                      Fotografia obrigatória na execução
-                    </span>
-                  )}
                 </div>
               </article>
             ))}
@@ -179,6 +199,11 @@ export function ChecklistPreview({
       {!applicable.length && (
         <p className="info-card">Nenhum item se aplica a essa ocupação.</p>
       )}
+      <p className="info-card">
+        <Camera size={18} />
+        Na execução real, as fotos ficam em um único campo, com limite de 8 por
+        envio.
+      </p>
       {error && (
         <p role="alert" className="alert error">
           {error}

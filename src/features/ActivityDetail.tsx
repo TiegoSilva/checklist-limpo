@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Users,
   Sparkles,
@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   Save,
   Plus,
-  Camera,
   Image,
   Send,
   CheckCheck,
@@ -14,6 +13,15 @@ import {
 } from 'lucide-react';
 import { Modal, Form, Badge } from '../components';
 import OrderStayContext from './OrderStayContext';
+import OrderManagement from './OrderManagement';
+import {
+  executionResponses,
+  itemResponse,
+  updateItemResponse,
+  sendExecution,
+  MAX_EXECUTION_PHOTOS,
+} from './execution';
+import ExecutionPhotos from './ExecutionPhotos';
 import {
   dateTime,
   dayKey,
@@ -28,7 +36,8 @@ import {
   saveDraft,
   removeDraft,
   signedImage,
-  uploadEvidence,
+  uploadPhoto,
+  type ExecutionPhoto,
   type Draft,
   type Run,
 } from '../lib/client';
@@ -59,7 +68,40 @@ export default function ActivityDetail({
   unitName: (id: string) => string;
   person: (id: string) => string;
 }) {
-  const [responses, setResponses] = useState(a.responses);
+  const previousReview = data.checklist_review_cycles.find(
+    (r) => r.activity_id === a.id && r.attempt === a.attempt - 1,
+  );
+  const lockedItems =
+    a.attempt > 1 &&
+    previousReview?.decision === 'rejected' &&
+    !a.manager_reopened
+      ? a.items
+          .filter((i) => !previousReview.rejected_items.includes(i.id))
+          .map((i) => i.id)
+      : [];
+  const [responses, setResponses] = useState(() =>
+    executionResponses(a.items, a.responses, lockedItems),
+  );
+  const [photos, setPhotos] = useState<ExecutionPhoto[]>([]);
+  const [submissionId, setSubmissionId] = useState<string>(() =>
+    crypto.randomUUID(),
+  );
+  const [sending, setSending] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [executionError, setExecutionError] = useState('');
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftRevision, setDraftRevision] = useState(a.revision);
+  const dirty = useRef(false);
+  const notification = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (executionError || submitted) {
+      notification.current?.focus({ preventScroll: true });
+      notification.current?.scrollIntoView({
+        block: 'start',
+        behavior: 'smooth',
+      });
+    }
+  }, [executionError, submitted]);
   const [draft, setDraft] = useState<Draft>();
   const [sync, setSync] = useState('Confirmado pelo servidor');
   const [finding, setFinding] = useState(false);
@@ -70,35 +112,90 @@ export default function ActivityDetail({
     null,
   );
   const editable =
-    a.assignee === user && ['in_progress', 'correction'].includes(a.status);
+    a.assignee === user &&
+    ['in_progress', 'correction'].includes(a.status) &&
+    !submitted;
   const pending = a.status === 'pending' && a.assignee === user;
   const reviewing = a.status === 'review' && manager && a.assignee !== user;
+  const makeDraft = (): Draft => ({
+    revision: draftRevision,
+    responses,
+    photos,
+    submissionId,
+    attempt: a.attempt,
+    savedAt: new Date().toISOString(),
+  });
+  const persist = async (d: Draft) => {
+    await saveDraft(user, a.id, d);
+    setDraft(d);
+  };
   useEffect(() => {
-    getDraft(user, a.id).then(setDraft).catch(console.error);
+    let active = true;
+    getDraft(user, a.id)
+      .then((d) => {
+        if (!active) return;
+        setDraft(d);
+        if (
+          d &&
+          d.revision === a.revision &&
+          (!d.attempt || d.attempt === a.attempt) &&
+          editable
+        ) {
+          setResponses(executionResponses(a.items, d.responses, lockedItems));
+          setPhotos(d.photos ?? []);
+          setSubmissionId(d.submissionId ?? crypto.randomUUID());
+          setSync('Rascunho recuperado');
+          dirty.current = true;
+        }
+      })
+      .catch(() => {
+        if (active)
+          setExecutionError(
+            'Não foi possível recuperar o rascunho deste dispositivo.',
+          );
+      })
+      .finally(() => {
+        if (active) setDraftReady(true);
+      });
+    return () => {
+      active = false;
+    };
   }, [user, a.id]);
   useEffect(() => {
-    if (sync === 'Confirmado pelo servidor' || !editable) return;
+    if (!dirty.current || !editable || !draftReady || sending) return;
     const t = setTimeout(() => {
-      const d = {
-        revision: a.revision,
-        responses,
-        savedAt: new Date().toISOString(),
-      };
-      void saveDraft(user, a.id, d)
-        .then(() => setDraft(d))
-        .catch(console.error);
+      void persist(makeDraft()).catch(() =>
+        setExecutionError(
+          'Não foi possível salvar o rascunho. Mantenha esta vistoria aberta e tente novamente.',
+        ),
+      );
     }, 700);
     return () => clearTimeout(t);
-  }, [responses, sync, editable, user, a.id, a.revision]);
+  }, [
+    responses,
+    photos,
+    editable,
+    draftReady,
+    sending,
+    user,
+    a.id,
+    a.revision,
+    draftRevision,
+  ]);
   useEffect(() => {
-    if (sync === 'Confirmado pelo servidor') setResponses(a.responses);
-  }, [a.revision, a.responses, sync]);
+    if (!dirty.current) {
+      setResponses(executionResponses(a.items, a.responses, lockedItems));
+      setDraftRevision(a.revision);
+    }
+  }, [a.revision, a.responses]);
   const update = (id: string, patch: Partial<Response>) => {
+    const item = a.items.find((i) => i.id === id)!;
     setResponses((prev) => ({
       ...prev,
-      [id]: { ...prev[id], confirmed: false, ...patch },
+      [id]: updateItemResponse(item, prev[id], patch),
     }));
-    setSync('Alterações ainda não enviadas');
+    dirty.current = true;
+    setSync('Rascunho com alterações');
   };
   const mutate = (action: string, payload: Record<string, unknown> = {}) =>
     rpc('activity_action', {
@@ -107,15 +204,6 @@ export default function ActivityDetail({
       action,
       payload,
     });
-  const save = async () => {
-    const ok = await run(async () => {
-      await mutate('save', { responses });
-      await removeDraft(user, a.id);
-      setDraft(undefined);
-      setSync('Confirmado pelo servidor');
-    });
-    return ok;
-  };
   const evidence = data.evidence_files.filter((e) => e.activity_id === a.id);
   const reviews = data.checklist_review_cycles.filter(
     (r) => r.activity_id === a.id,
@@ -136,10 +224,41 @@ export default function ActivityDetail({
   return (
     <Modal
       title={`${unitName(a.unit_id)} · ${a.title}`}
-      onClose={onClose}
+      onClose={() => {
+        if (sending) return;
+        if (editable && dirty.current)
+          void persist(makeDraft())
+            .then(onClose)
+            .catch(() =>
+              setExecutionError(
+                'Não foi possível salvar o rascunho. Tente novamente antes de fechar.',
+              ),
+            );
+        else onClose();
+      }}
       wide
       className="checklist-modal"
     >
+      <div ref={notification} tabIndex={-1}>
+        {executionError && (
+          <p className="alert error" role="alert">
+            {executionError} Suas respostas e fotos continuam aqui. Corrija o
+            problema e tente enviar novamente.
+          </p>
+        )}
+        {submitted && (
+          <div className="alert success" role="status">
+            <CheckCheck size={22} />
+            <div>
+              <strong>Enviado para aprovação com sucesso!</strong>
+              <p>A vistoria foi recebida. Você já pode fechar esta tela.</p>
+            </div>
+          </div>
+        )}
+      </div>
+      {order && manager && (
+        <OrderManagement order={order} run={run} onChanged={onClose} />
+      )}
       {order && (
         <p className="info-card">
           Ordem de serviço · {model?.name || 'Modelo'} · v
@@ -192,7 +311,7 @@ export default function ActivityDetail({
         </span>
         <progress max={100} value={progress({ ...a, responses })} />
       </div>
-      {draft && (
+      {draft && draft.revision !== a.revision && !submitted && (
         <div className="alert">
           <Save size={20} />
           <div>
@@ -200,16 +319,40 @@ export default function ActivityDetail({
             {draft.revision !== a.revision
               ? ' A versão do servidor mudou. Compare antes de reaplicar; nada será sobrescrito automaticamente.'
               : ''}
+            <details>
+              <summary>Comparar com a conferência no servidor</summary>
+              <ul>
+                {a.items.map((i) => (
+                  <li key={i.id}>
+                    {i.title}:{' '}
+                    {a.responses[i.id]?.confirmed ? 'checkado' : 'pendente'}
+                    {i.mode === 'count'
+                      ? ` · quantidade ${a.responses[i.id]?.found ?? 'não informada'}`
+                      : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
             <div className="button-row">
               <button
                 className="text-button"
-                disabled={draft.revision !== a.revision || !editable}
+                disabled={
+                  Boolean(draft.attempt && draft.attempt !== a.attempt) ||
+                  !editable
+                }
                 onClick={() => {
-                  setResponses(draft.responses);
+                  if (!dirty.current)
+                    setResponses(
+                      executionResponses(a.items, draft.responses, lockedItems),
+                    );
+                  if (!dirty.current) setPhotos(draft.photos ?? []);
+                  setDraftRevision(a.revision);
+                  setSubmissionId(draft.submissionId ?? crypto.randomUUID());
+                  dirty.current = true;
                   setSync('Rascunho recuperado; aguardando envio');
                 }}
               >
-                Recuperar rascunho
+                Recuperar rascunho nesta revisão
               </button>
               <button
                 className="text-button"
@@ -264,7 +407,9 @@ export default function ActivityDetail({
           {a.items
             .filter((i) => i.room === room)
             .map((i) => {
-              const r = responses[i.id] ?? { confirmed: false };
+              const r = itemResponse(i, responses[i.id]);
+              const lockedItem =
+                lockedItems.includes(i.id) || busy || sending || !draftReady;
               const Extras = i.mode === 'count' ? 'details' : 'div';
               return (
                 <div
@@ -276,7 +421,7 @@ export default function ActivityDetail({
                       <input
                         type="checkbox"
                         checked={r.confirmed}
-                        disabled={!editable}
+                        disabled={!editable || lockedItem}
                         onChange={(e) =>
                           update(i.id, { confirmed: e.target.checked })
                         }
@@ -297,7 +442,7 @@ export default function ActivityDetail({
                         <label className="counter">
                           <button
                             aria-label={`Diminuir quantidade de ${i.title}`}
-                            disabled={!editable}
+                            disabled={!editable || lockedItem}
                             onClick={() =>
                               update(i.id, {
                                 found: Math.max(0, (r.found ?? 0) - 1),
@@ -310,7 +455,7 @@ export default function ActivityDetail({
                             aria-label={`Quantidade encontrada de ${i.title}`}
                             type="number"
                             min={0}
-                            disabled={!editable}
+                            disabled={!editable || lockedItem}
                             value={r.found ?? ''}
                             onChange={(e) =>
                               update(i.id, { found: Number(e.target.value) })
@@ -318,7 +463,7 @@ export default function ActivityDetail({
                           />
                           <button
                             aria-label={`Aumentar quantidade de ${i.title}`}
-                            disabled={!editable}
+                            disabled={!editable || lockedItem}
                             onClick={() =>
                               update(i.id, { found: (r.found ?? 0) + 1 })
                             }
@@ -335,25 +480,29 @@ export default function ActivityDetail({
                       <label className="field">
                         <span>Condição</span>
                         <select
-                          disabled={!editable}
-                          value={r.condition ?? ''}
+                          disabled={!editable || lockedItem}
+                          value={r.condition ?? 'ok'}
                           onChange={(e) =>
                             update(i.id, { condition: e.target.value })
                           }
                         >
-                          <option value="">Selecione</option>
                           {[
                             { value: 'ok', label: 'Conforme' },
+                            { value: 'damaged', label: 'Danificado' },
                             {
                               value: 'divergent',
                               label: 'Quantidade divergente',
                             },
-                            { value: 'damaged', label: 'Danificado' },
-                            { value: 'broken', label: 'Quebrado' },
-                            { value: 'missing', label: 'Não localizado' },
-                            { value: 'moved', label: 'Deslocado de ambiente' },
                           ].map((c) => (
-                            <option key={c.value} value={c.value}>
+                            <option
+                              key={c.value}
+                              value={c.value}
+                              disabled={
+                                c.value === 'divergent'
+                                  ? r.found === i.expected
+                                  : r.found !== i.expected
+                              }
+                            >
                               {c.label}
                             </option>
                           ))}
@@ -363,10 +512,7 @@ export default function ActivityDetail({
                   )}
                   <Extras className="item-extras">
                     {i.mode === 'count' && (
-                      <summary>
-                        Fotos, observações e reposição
-                        {i.evidence_required ? ' · Foto obrigatória' : ''}
-                      </summary>
+                      <summary>Observações e reposição</summary>
                     )}
                     {i.instructions && (
                       <p className="muted">{i.instructions}</p>
@@ -375,13 +521,12 @@ export default function ActivityDetail({
                       <label className="field">
                         <span>Conferência técnica</span>
                         <select
-                          disabled={!editable}
-                          value={r.answer ?? ''}
+                          disabled={!editable || lockedItem}
+                          value={r.answer ?? 'ok'}
                           onChange={(e) =>
                             update(i.id, { answer: e.target.value })
                           }
                         >
-                          <option value="">Selecione uma resposta</option>
                           <option value="ok">Conforme</option>
                           <option value="issue">Não conforme</option>
                           {i.allow_na && (
@@ -409,7 +554,7 @@ export default function ActivityDetail({
                                 <input
                                   type="number"
                                   min={0}
-                                  disabled={!editable}
+                                  disabled={!editable || lockedItem}
                                   value={
                                     (r[f.key as keyof Response] as number) ?? ''
                                   }
@@ -433,12 +578,13 @@ export default function ActivityDetail({
                       <span>
                         Observação{' '}
                         {r.answer === 'issue' ||
+                        r.condition === 'damaged' ||
                         (r.found !== undefined && r.found !== i.expected)
                           ? '(obrigatória para divergências)'
                           : '(opcional)'}
                       </span>
                       <textarea
-                        disabled={!editable}
+                        disabled={!editable || lockedItem}
                         value={r.note ?? ''}
                         onChange={(e) => update(i.id, { note: e.target.value })}
                       />
@@ -465,57 +611,7 @@ export default function ActivityDetail({
                           Ver referência
                         </button>
                       )}
-                      {editable && (
-                        <label className="button secondary file-button">
-                          <Camera size={16} />
-                          {i.evidence_required
-                            ? 'Anexar foto obrigatória'
-                            : 'Anexar foto'}
-                          <input
-                            type="file"
-                            accept="image/jpeg,image/png,image/webp"
-                            capture="environment"
-                            disabled={busy}
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (file)
-                                await run(
-                                  () => uploadEvidence(a.id, i.id, file),
-                                  'Foto recebida pelo servidor.',
-                                );
-                              e.target.value = '';
-                            }}
-                          />
-                        </label>
-                      )}
-                      {evidence
-                        .filter((e) => e.item_id === i.id)
-                        .map((e, index) => (
-                          <button
-                            className="button secondary"
-                            key={e.id}
-                            onClick={() =>
-                              void run(
-                                async () =>
-                                  setImage({
-                                    url: await signedImage('evidence', e.path),
-                                    label: `Execução · ${i.title} · ${dateTime(e.received_at)}`,
-                                  }),
-                                'Foto de execução aberta.',
-                              )
-                            }
-                          >
-                            <Image size={15} />
-                            Foto {index + 1}
-                          </button>
-                        ))}
                     </div>
-                    {i.evidence_required &&
-                      !evidence.some((e) => e.item_id === i.id) && (
-                        <small className="muted">
-                          Fotografia pendente. A conclusão ficará bloqueada.
-                        </small>
-                      )}
                   </Extras>
                 </div>
               );
@@ -591,60 +687,108 @@ export default function ActivityDetail({
           />
         )}
       </section>
+      <ExecutionPhotos
+        photos={photos}
+        evidence={evidence}
+        attempt={a.attempt}
+        editable={editable && draftReady && !busy && !sending}
+        onChange={(next) => {
+          setPhotos(next);
+          dirty.current = true;
+          setSync('Rascunho com alterações');
+        }}
+        onError={setExecutionError}
+        onView={async (e) => {
+          try {
+            setImage({
+              url: await signedImage('evidence', e.path),
+              label: 'Foto da vistoria',
+            });
+          } catch (error) {
+            setExecutionError(
+              error instanceof Error
+                ? error.message
+                : 'Não foi possível abrir a foto.',
+            );
+          }
+        }}
+      />
       {editable && (
         <div className="detail-actions">
           <small>{sync}</small>
           <div className="button-row">
             <button
               className="button secondary"
-              disabled={busy}
+              disabled={busy || sending || !draftReady}
               onClick={() =>
                 void run(async () => {
-                  const d = {
-                    revision: a.revision,
-                    responses,
-                    savedAt: new Date().toISOString(),
-                  };
-                  await saveDraft(user, a.id, d);
-                  setDraft(d);
-                  setSync('Salvo somente neste dispositivo');
-                }, 'Rascunho local salvo. Ainda não enviado.')
+                  await persist(makeDraft());
+                  setSync('Rascunho salvo');
+                }, 'Rascunho salvo.')
               }
             >
               <Save size={17} />
-              Salvar no dispositivo
-            </button>
-            <button
-              className="button secondary"
-              disabled={busy}
-              onClick={() => void save()}
-            >
-              <Save size={17} />
-              Enviar progresso
+              Salvar Rascunho
             </button>
             <button
               className="button primary"
-              disabled={busy || sync !== 'Confirmado pelo servidor'}
-              onClick={() =>
-                void run(
-                  async () => {
-                    await mutate('submit');
-                    onClose();
-                  },
-                  !order && a.kind === 'inspection'
-                    ? 'Vistoria concluída.'
-                    : 'Enviado para aprovação.',
-                )
-              }
+              disabled={busy || sending || !draftReady}
+              onClick={async () => {
+                setSending(true);
+                setExecutionError('');
+                const ok = await run(async () => {
+                  try {
+                    await sendExecution(makeDraft(), {
+                      persist: async (d) => {
+                        await persist(d);
+                        setPhotos(d.photos ?? []);
+                      },
+                      upload: (photo) =>
+                        uploadPhoto(
+                          'activity',
+                          a.id,
+                          photo.file,
+                          '__activity__',
+                          photo.id,
+                        ),
+                      submit: (d) =>
+                        rpc('submit_checklist', {
+                          activity: a.id,
+                          expected_revision: d.revision,
+                          submission: d.submissionId,
+                          responses: d.responses,
+                        }),
+                    });
+                  } catch (error) {
+                    setExecutionError(
+                      error instanceof Error
+                        ? error.message
+                        : 'Não foi possível enviar a vistoria.',
+                    );
+                    throw error;
+                  }
+                }, 'Vistoria enviada para aprovação com sucesso.');
+                if (ok) {
+                  setSubmitted(true);
+                  dirty.current = false;
+                  setDraft(undefined);
+                  void removeDraft(user, a.id).catch(() => {});
+                } else {
+                  setExecutionError(
+                    (previous) =>
+                      previous || 'Não foi possível confirmar o envio.',
+                  );
+                }
+                setSending(false);
+              }}
             >
               <Send size={17} />
-              {!order && a.kind === 'inspection'
-                ? 'Concluir vistoria'
-                : 'Enviar para aprovação'}
+              {sending ? 'Enviando…' : 'Enviar para aprovação'}
             </button>
           </div>
           <small>
-            Após alterar os itens, envie o progresso antes de finalizar.
+            Respostas e até {MAX_EXECUTION_PHOTOS} fotos são enviadas juntas. Em
+            caso de erro, você pode continuar de onde parou.
           </small>
         </div>
       )}

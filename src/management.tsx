@@ -10,6 +10,7 @@ import {
 } from './domain';
 import { rpc, signedImage, uploadPhoto } from './lib/client';
 import OrderStayContext from './features/OrderStayContext';
+import OrderManagement from './features/OrderManagement';
 type Run = (fn: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function MemberEditor({
   data,
@@ -171,6 +172,7 @@ export function ServiceDetail({
     dayKey(new Date(s.due_at)) > dayKey(new Date());
   return (
     <Modal title={s.title} onClose={onClose} wide>
+      {manager && <OrderManagement order={s} run={run} onChanged={onClose} />}
       <div className="detail-top">
         <span className={`badge status-${s.status}`}>
           {statusLabels[s.status]}

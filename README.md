@@ -120,3 +120,5 @@ A interface prioriza celular, com checks circulares, itens e quantidades em linh
 A migração `202610150009_checkin_execution_windows.sql` simplifica a programação: escolhe-se só o modelo de check-in; a saída é derivada dos seus itens com quantidade. As ordens guardam o check-in de origem e usam faixas padrão de 13:30–15:00 na entrada e 11:30–12:30 na saída. O gestor pode ajustar o horário do checkout no dia da execução, inclusive já iniciado e antes da revisão. Aplique a 009 depois da 008, antes de publicar este frontend.
 
 Modelos com nomes próprios e duplicação entre unidades: aplique uma vez `supabase/migrations/202610150010_named_checklist_models.sql` após a 009. Na criação de OS, escolha Check-in ou Tarefa; o modelo é escolhido dentro do Check-in. Consulte [Modelos e ordens](docs/MODELOS_E_ORDENS.md).
+
+Execução simplificada, fotos gerais (até 8), envio com retomada e gestão de status/exclusão: aplique uma vez `supabase/migrations/202610150011_execution_and_order_management.sql` após a 010. Publique o frontend e a API de evidências juntos. Detalhes em [Modelos e ordens](docs/MODELOS_E_ORDENS.md).

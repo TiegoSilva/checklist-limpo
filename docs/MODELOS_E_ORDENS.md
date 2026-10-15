@@ -49,3 +49,17 @@ Não foi aplicada migração no projeto remoto nesta entrega. A integração rea
 A migração `202610150009_checkin_execution_windows.sql` ativa as faixas de execução, o checkout derivado e o vínculo de ordens adicionais. Aplique uma vez depois da 008. Ordens anteriores mantêm suas listas e seus prazos; a migração não reescreve execuções históricas.
 
 A migração `202610150010_named_checklist_models.sql` permite vários modelos nomeados por unidade e cópias independentes. Execute uma vez após a 009, antes de usar o novo editor. Nenhuma migração remota foi aplicada automaticamente.
+
+## Execução e gestão das ordens (migração 011)
+
+O administrador ou gestor da unidade pode abrir **Gerenciar ordem de serviço** para alterar o status, informando o motivo. Pendente, em execução, em aprovação, aprovada, em correção e cancelada são as opções. Aprovação mantém a conferência das evidências e a exigência de outro gestor; não permite aprovar a própria execução. Reabrir uma ordem preserva a aprovação anterior e inicia uma nova tentativa com as respostas existentes.
+
+**Excluir ordem** retira a ordem da operação e preserva respostas, fotos e auditoria. Excluir o check-in também exclui o checkout gerado com ele, liberando as datas dessa hospedagem. Tarefas adicionais não são excluídas junto. Em **Ordens de serviço → Ordens excluídas**, o gestor pode restaurar o mesmo par como pendente. A restauração é bloqueada se as datas já estiverem ocupadas por outra hospedagem.
+
+Na conferência, as quantidades começam com o esperado e a condição **Conforme**, mas os checks continuam desmarcados até a conferência explícita. Marcar o check não exige alterar o contador, e alterar a quantidade mantém o check. As condições são **Conforme**, **Danificado** e **Quantidade divergente**; divergência acompanha automaticamente a contagem e volta a Conforme quando corrigida. Danos e divergências exigem observação.
+
+As ações são **Salvar Rascunho** e **Enviar para aprovação**. O rascunho guarda as respostas e os arquivos das fotos neste dispositivo, por usuário e vistoria. O único campo **Fotos da vistoria** aceita câmera ou seleção de imagens, até 8 por tentativa, JPG/PNG/WebP de até 10 MB cada. Se o modelo exigir fotografia, uma foto geral da tentativa atende à exigência, sem enviar fotos separadas por tarefa. Correções exigem foto nova quando houver exigência fotográfica; fotos anteriores permanecem no histórico.
+
+O envio confirma respostas, snapshot e status em uma transação. Fotos têm identificadores estáveis e recibos verificados pela API. Em caso de falha, o alerta aparece dentro da vistoria, respostas e arquivos permanecem no rascunho e o reenvio retoma as fotos pendentes. Após confirmação, aparece **Enviado para aprovação com sucesso!**. Uma falha de conexão depois de o servidor confirmar pode ser reenviada sem criar nova submissão.
+
+Aplique `202610150011_execution_and_order_management.sql` uma vez, após a 010, antes de publicar este frontend e a API de evidências. As regras antigas permanecem para execuções históricas; o novo fluxo é ativado no envio pela nova interface. Nenhuma migração remota foi aplicada nesta entrega.

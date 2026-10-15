@@ -57,6 +57,7 @@ import InventoryEditor from './features/InventoryEditor';
 import StayAgenda from './features/StayAgenda';
 import WorkOrderEditor from './features/WorkOrderEditor';
 import { serviceWindow } from './features/OrderStayContext';
+import { DeletedOrders } from './features/OrderManagement';
 
 const navigation = [
   { path: '/', label: 'Visão geral', icon: LayoutDashboard },
@@ -307,6 +308,7 @@ function Portal({ session }: { session: Session }) {
   );
   const taskOrders = data.service_orders.filter(
     (s) =>
+      !s.deleted_at &&
       !s.activity_id &&
       (!property ||
         data.units.find((u) => u.id === s.unit_id)?.property_id === property) &&
@@ -1182,10 +1184,12 @@ function Portal({ session }: { session: Session }) {
               <div className="section-heading">
                 <h2>Ordens de serviço</h2>
                 <span className="count-pill">
-                  {data.service_orders.length} ordens
+                  {data.service_orders.filter((s) => !s.deleted_at).length}{' '}
+                  ordens
                 </span>
               </div>
               {data.service_orders
+                .filter((s) => !s.deleted_at)
                 .filter(
                   (s) =>
                     (!property ||
@@ -1196,13 +1200,16 @@ function Portal({ session }: { session: Session }) {
                       .includes(search.toLowerCase()),
                 )
                 .map(orderCard)}
-              {!data.service_orders.length && (
+              {!data.service_orders.some((s) => !s.deleted_at) && (
                 <Empty
                   title="Nenhuma ordem de serviço"
                   description="Crie ordens com modelos de checklist ou tarefas simples."
                   action={() => open('service')}
                   label="Abrir ordem de serviço"
                 />
+              )}
+              {manager && (
+                <DeletedOrders data={data} run={run} property={property} />
               )}
             </section>
           )}
@@ -1782,7 +1789,7 @@ function Portal({ session }: { session: Session }) {
       )}
       {active && (
         <ActivityDetail
-          key={active.id}
+          key={`${active.id}:${active.attempt}`}
           activity={active}
           data={data}
           user={user}

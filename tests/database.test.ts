@@ -2563,3 +2563,497 @@ describe.sequential('modelos nomeados e cópias independentes', () => {
     ).toBe(8);
   });
 });
+
+describe.sequential('envio único, fotos gerais e gestão das ordens', () => {
+  let executionUnit: string,
+    root: string,
+    out: string,
+    inActivity: string,
+    outActivity: string,
+    arrival: string,
+    replacement: string;
+  const tokenIn = '00000000-0000-4000-8000-000000000301',
+    tokenOut = '00000000-0000-4000-8000-000000000302';
+  const revision = async (id: string, table = 'activities') =>
+    (
+      await db.query<{ revision: number }>(
+        `select revision from ${table} where id=$1`,
+        [id],
+      )
+    ).rows[0].revision;
+  const submit = async (
+    id: string,
+    responses: unknown,
+    token: string,
+    rev?: number,
+  ) =>
+    rpc('submit_checklist', [
+      id,
+      rev ?? (await revision(id)),
+      token,
+      JSON.stringify(responses),
+    ]);
+  const manage = async (
+    id: string,
+    action: string,
+    payload: unknown = { reason: 'Ajuste solicitado pela gestão' },
+    rev?: number,
+  ) =>
+    rpc('manage_work_order', [
+      id,
+      rev ?? (await revision(id, 'service_orders')),
+      action,
+      JSON.stringify(payload),
+    ]);
+  const photo = async (id: string, file = crypto.randomUUID()) => {
+    await asUser(worker);
+    await db.query(
+      "insert into storage.objects(bucket_id,name) values('evidence',$1)",
+      [`${id}/${file}`],
+    );
+    await receive(id, '__activity__', file, 'a'.repeat(64));
+    return file;
+  };
+  const answers = (found = 4) => ({
+    cup: {
+      confirmed: true,
+      found,
+      condition: 'ok',
+      ...(found !== 4 ? { note: 'Falta um copo na cozinha' } : {}),
+    },
+    'towel-shared': { confirmed: true, found: 2, condition: 'ok' },
+  });
+  it('envia respostas e uma foto geral para todos os itens em uma transação idempotente', async () => {
+    await asUser(admin);
+    executionUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Execução simplificada',
+        capacity: 6,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    const model = (await rpc('save_named_checklist', [
+      JSON.stringify({
+        unit_id: executionUnit,
+        name: 'Conferência padrão',
+        items: [
+          { ...sharedCup, evidence_required: true },
+          { ...sharedTowel, evidence_required: true },
+          { ...item, id: 'technical', mode: 'technical' },
+        ],
+      }),
+    ])) as string;
+    const dates = (
+      await db.query<{ arrival: string; departure: string }>(
+        "select ((now() at time zone 'America/Sao_Paulo')::date-1)::text arrival, (now() at time zone 'America/Sao_Paulo')::date::text departure",
+      )
+    ).rows[0];
+    arrival = dates.arrival;
+    root = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: executionUnit,
+        order_type: 'checkin',
+        execution_mode: 'checklist',
+        template_id: model,
+        assignee: worker,
+        checkout_assignee: worker,
+        guest_name: 'Estadia execução',
+        checkin: dates.arrival,
+        duration_nights: 1,
+        guests: 2,
+      }),
+    ])) as string;
+    const orders = (
+      await db.query<{ id: string; activity_id: string; order_type: string }>(
+        'select id,activity_id,order_type from service_orders where checkin_order_id=$1',
+        [root],
+      )
+    ).rows;
+    inActivity = orders.find((o) => o.order_type === 'checkin')!.activity_id;
+    out = orders.find((o) => o.order_type === 'checkout')!.id;
+    outActivity = orders.find((o) => o.order_type === 'checkout')!.activity_id;
+    await asUser(worker);
+    await action(inActivity, 'start');
+    await expect(submit(inActivity, {}, tokenIn)).rejects.toThrow(/Confira/);
+    const before = (
+      await db.query<{ responses: unknown; execution_version: number }>(
+        'select responses,execution_version from activities where id=$1',
+        [inActivity],
+      )
+    ).rows[0];
+    expect(before).toEqual({ responses: {}, execution_version: 1 });
+    const checked = {
+      cup: { confirmed: true },
+      'towel-shared': { confirmed: true },
+      technical: { confirmed: true },
+    };
+    await expect(submit(inActivity, checked, tokenIn)).rejects.toThrow(/foto/);
+    await photo(inActivity);
+    const beforeRevision = await revision(inActivity);
+    await submit(inActivity, checked, tokenIn, beforeRevision);
+    const sent = (
+      await db.query<{ status: string; responses: Record<string, unknown> }>(
+        'select status,responses from activities where id=$1',
+        [inActivity],
+      )
+    ).rows[0];
+    expect(sent.status).toBe('review');
+    expect(sent.responses.cup).toMatchObject({
+      confirmed: true,
+      found: 4,
+      condition: 'ok',
+    });
+    expect(sent.responses.technical).toMatchObject({
+      confirmed: true,
+      answer: 'ok',
+    });
+    const after = await revision(inActivity);
+    await submit(inActivity, checked, tokenIn, beforeRevision);
+    expect(await revision(inActivity)).toBe(after);
+    expect(
+      (
+        await db.query(
+          'select id from checklist_review_cycles where activity_id=$1',
+          [inActivity],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    await expect(
+      submit(inActivity, checked, crypto.randomUUID(), beforeRevision),
+    ).rejects.toThrow(/CONFLICT/);
+    await asUser(admin);
+    await manage(root, 'status', {
+      status: 'approved',
+      reason: 'Conferência aprovada pela gestão',
+    });
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from activities where id=$1',
+          [inActivity],
+        )
+      ).rows[0].status,
+    ).toBe('completed');
+  });
+  it('limita a oito fotos, permite repetir o recibo e calcula divergência no servidor', async () => {
+    await asUser(worker);
+    await action(outActivity, 'start');
+    let last = '';
+    for (let i = 0; i < 8; i++) last = await photo(outActivity);
+    await receive(outActivity, '__activity__', last, 'a'.repeat(64));
+    const ninth = crypto.randomUUID();
+    await db.query(
+      "insert into storage.objects(bucket_id,name) values('evidence',$1)",
+      [`${outActivity}/${ninth}`],
+    );
+    await expect(
+      receive(outActivity, '__activity__', ninth, 'a'.repeat(64)),
+    ).rejects.toThrow(/8 fotos/);
+    expect(
+      (
+        await db.query('select id from evidence_files where activity_id=$1', [
+          outActivity,
+        ])
+      ).rows,
+    ).toHaveLength(8);
+    await expect(
+      submit(
+        outActivity,
+        { ...answers(3), cup: { confirmed: true, found: 3, condition: 'ok' } },
+        tokenOut,
+      ),
+    ).rejects.toThrow(/Descreva a divergência/);
+    expect(
+      (
+        await db.query<{ responses: unknown }>(
+          'select responses from activities where id=$1',
+          [outActivity],
+        )
+      ).rows[0].responses,
+    ).toEqual({});
+    await submit(outActivity, answers(3), tokenOut);
+    expect(
+      (
+        await db.query<{ responses: Record<string, unknown> }>(
+          'select responses from activities where id=$1',
+          [outActivity],
+        )
+      ).rows[0].responses.cup,
+    ).toMatchObject({ condition: 'divergent', confirmed: true, found: 3 });
+  });
+  it('exige foto nova na correção e mantém bloqueados os itens que já estavam aprovados', async () => {
+    await asUser(admin);
+    await action(outActivity, 'reject', {
+      reason: 'Refazer a contagem dos copos',
+      items: ['cup'],
+    });
+    await asUser(worker);
+    const retained = (
+      await db.query<{ responses: Record<string, unknown> }>(
+        'select responses from activities where id=$1',
+        [outActivity],
+      )
+    ).rows[0].responses;
+    const corrected = {
+      ...retained,
+      cup: { confirmed: true, found: 4, condition: 'ok' },
+    };
+    const token = crypto.randomUUID();
+    await expect(submit(outActivity, corrected, token)).rejects.toThrow(/foto/);
+    await photo(outActivity);
+    await expect(
+      submit(
+        outActivity,
+        {
+          ...corrected,
+          'towel-shared': {
+            confirmed: true,
+            found: 1,
+            condition: 'divergent',
+            note: 'Não pode mudar este item',
+          },
+        },
+        token,
+      ),
+    ).rejects.toThrow(/somente os itens/);
+    await submit(outActivity, corrected, token);
+    await expect(
+      manage(out, 'status', {
+        status: 'approved',
+        reason: 'Tentativa de aprovar a própria execução',
+      }),
+    ).rejects.toThrow(/somente administrador/);
+    await asUser(admin);
+    await manage(out, 'status', {
+      status: 'approved',
+      reason: 'Correção conferida pela gestão',
+    });
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [out],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+  });
+  it('permite reabrir pelo gestor preservando a aprovação anterior e editar a nova tentativa', async () => {
+    await asUser(admin);
+    await manage(root, 'status', {
+      status: 'in_progress',
+      reason: 'Reabrir para uma nova conferência',
+    });
+    const row = (
+      await db.query<{
+        attempt: number;
+        manager_reopened: boolean;
+        responses: Record<string, unknown>;
+      }>(
+        'select attempt,manager_reopened,responses from activities where id=$1',
+        [inActivity],
+      )
+    ).rows[0];
+    expect(row.attempt).toBe(2);
+    expect(row.manager_reopened).toBe(true);
+    expect(
+      (
+        await db.query<{ decision: string }>(
+          'select decision from checklist_review_cycles where activity_id=$1 and attempt=1',
+          [inActivity],
+        )
+      ).rows[0].decision,
+    ).toBe('approved');
+    await photo(inActivity);
+    await submit(
+      inActivity,
+      {
+        ...row.responses,
+        cup: {
+          confirmed: true,
+          found: 5,
+          condition: 'ok',
+          note: 'Um copo extra disponível',
+        },
+      },
+      crypto.randomUUID(),
+    );
+    await asUser(admin);
+    await manage(root, 'status', {
+      status: 'approved',
+      reason: 'Nova conferência aprovada',
+    });
+    expect(
+      (
+        await db.query(
+          'select id from checklist_review_cycles where activity_id=$1',
+          [inActivity],
+        )
+      ).rows,
+    ).toHaveLength(2);
+  });
+  it('exclui o check-in e seu checkout juntos com controle de acesso, revisão e histórico', async () => {
+    await asUser(worker);
+    await expect(manage(root, 'delete')).rejects.toThrow(
+      /somente administrador/,
+    );
+    await asUser(admin);
+    await expect(
+      manage(root, 'delete', {}, await revision(root, 'service_orders')),
+    ).rejects.toThrow(/motivo/);
+    await expect(
+      manage(root, 'delete', { reason: 'Excluir hospedagem de teste' }, -1),
+    ).rejects.toThrow(/CONFLICT/);
+    const before = (
+      await db.query<{ responses: unknown }>(
+        'select responses from activities where id=$1',
+        [inActivity],
+      )
+    ).rows[0].responses;
+    await manage(root, 'delete', {
+      reason: 'Hospedagem cancelada antes da próxima operação',
+    });
+    expect(
+      (
+        await db.query(
+          'select id from service_orders where checkin_order_id=$1 and deleted_at is not null',
+          [root],
+        )
+      ).rows,
+    ).toHaveLength(2);
+    expect(
+      (await db.query('select id from team_agenda where id=$1', [root])).rows,
+    ).toHaveLength(0);
+    expect(
+      (
+        await db.query<{ responses: unknown }>(
+          'select responses from activities where id=$1',
+          [inActivity],
+        )
+      ).rows[0].responses,
+    ).toEqual(before);
+    expect(
+      (
+        await db.query('select id from evidence_files where activity_id=$1', [
+          outActivity,
+        ])
+      ).rows,
+    ).toHaveLength(9);
+    await asUser(worker);
+    expect(
+      (
+        await db.query(
+          'select id from service_orders where checkin_order_id=$1',
+          [root],
+        )
+      ).rows,
+    ).toHaveLength(0);
+    expect(
+      (await db.query('select id from activities where id=$1', [inActivity]))
+        .rows,
+    ).toHaveLength(0);
+    await expect(action(inActivity, 'start')).rejects.toThrow();
+    await asUser(admin);
+    replacement = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: executionUnit,
+        order_type: 'checkin',
+        execution_mode: 'task',
+        assignee: worker,
+        checkout_assignee: worker,
+        guest_name: 'Outra estadia nas datas liberadas',
+        checkin: arrival,
+        duration_nights: 1,
+        guests: 2,
+      }),
+    ])) as string;
+  });
+  it('restaura o mesmo par como pendente, mas impede restaurar sobre uma nova hospedagem', async () => {
+    await asUser(admin);
+    await expect(manage(root, 'restore')).rejects.toThrow(/conflitam/);
+    await manage(replacement, 'delete', {
+      reason: 'Remover a hospedagem substituta',
+    });
+    await manage(root, 'restore', {
+      reason: 'Restaurar a hospedagem original',
+    });
+    const restored = (
+      await db.query<{ id: string; status: string; deleted_at: string | null }>(
+        'select id,status,deleted_at from service_orders where checkin_order_id=$1',
+        [root],
+      )
+    ).rows;
+    expect(restored).toHaveLength(2);
+    expect(
+      restored.every((s) => s.status === 'assigned' && s.deleted_at === null),
+    ).toBe(true);
+    expect(
+      (await db.query('select id from team_agenda where id=$1', [root])).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await db.query('select id from evidence_files where activity_id=$1', [
+          outActivity,
+        ])
+      ).rows,
+    ).toHaveLength(9);
+  });
+  it('permite gerir também tarefas simples e bloqueia revisão sem evidências ou aprovação pelo próprio executor', async () => {
+    await asUser(admin);
+    const task = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: executionUnit,
+        order_type: 'general',
+        execution_mode: 'task',
+        assignee: worker,
+        title: 'Conferir fechadura',
+        due_at: '2026-10-15T18:00:00Z',
+        occupancy: 2,
+      }),
+    ])) as string;
+    await manage(task, 'status', {
+      status: 'in_progress',
+      reason: 'Iniciar tarefa pela gestão',
+    });
+    await expect(
+      manage(task, 'status', {
+        status: 'review',
+        reason: 'Encaminhar sem evidência',
+      }),
+    ).rejects.toThrow(/conclusão e a foto/);
+    await manage(task, 'status', {
+      status: 'cancelled',
+      reason: 'Serviço deixou de ser necessário',
+    });
+    await manage(task, 'delete', {
+      reason: 'Remover serviço que foi cancelado',
+    });
+    await manage(task, 'restore');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [task],
+        )
+      ).rows[0].status,
+    ).toBe('assigned');
+    const own = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: executionUnit,
+        order_type: 'general',
+        execution_mode: 'task',
+        assignee: admin,
+        title: 'Tarefa do próprio gestor',
+        due_at: '2026-10-15T18:00:00Z',
+        occupancy: 2,
+      }),
+    ])) as string;
+    await expect(
+      manage(own, 'status', {
+        status: 'approved',
+        reason: 'Autoaprovação não permitida',
+      }),
+    ).rejects.toThrow(/Autoaprovação/);
+  });
+});

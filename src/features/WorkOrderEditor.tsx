@@ -723,6 +723,7 @@ export default function WorkOrderEditor({
                             (o) =>
                               o.unit_id === draft.unit &&
                               o.order_type === 'checkin' &&
+                              !o.deleted_at &&
                               o.status !== 'cancelled',
                           )
                           .map((o) => (

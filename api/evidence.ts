@@ -15,11 +15,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY } =
     process.env;
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY)
-    return res
-      .status(503)
-      .json({
-        error: 'Configure as variáveis do servidor para receber evidências.',
-      });
+    return res.status(503).json({
+      error: 'Configure as variáveis do servidor para receber evidências.',
+    });
   const token = req.headers.authorization;
   if (!token?.startsWith('Bearer '))
     return res.status(401).json({ error: 'Autenticação necessária' });
@@ -54,17 +52,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res
       .status(403)
       .json({ error: 'Envio não autorizado para esta atividade' });
-  if (activity && !body.item)
-    return res.status(400).json({ error: 'Item obrigatório' });
   const server = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
   const { data: existing } = await server
     .from(activity ? 'evidence_files' : 'service_evidence')
-    .select('id,sha256,uploader')
+    .select(
+      activity
+        ? 'id,sha256,uploader,activity_id'
+        : 'id,sha256,uploader,service_id',
+    )
     .eq('id', body.file_id)
     .maybeSingle();
-  if (existing?.uploader === user.id)
+  if (
+    existing?.uploader === user.id &&
+    ('activity_id' in existing ? existing.activity_id : existing.service_id) ===
+      body.resource
+  )
     return res
       .status(200)
       .json({ file_id: existing.id, sha256: existing.sha256, confirmed: true });
@@ -96,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     {
       actor: user.id,
       ...(activity
-        ? { activity: body.resource, item: body.item }
+        ? { activity: body.resource, item: body.item ?? '__activity__' }
         : { service: body.resource }),
       file_id: body.file_id,
       hash,

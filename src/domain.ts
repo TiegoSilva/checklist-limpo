@@ -26,6 +26,9 @@ export type Response = {
   replenished?: number;
 };
 export type Activity = {
+  deleted_at?: string | null;
+  execution_version?: number;
+  manager_reopened?: boolean;
   id: string;
   unit_id: string;
   cycle_id: string;
@@ -69,6 +72,8 @@ export type Profile = {
   font_scale: number;
 };
 export type Service = {
+  deleted_at?: string | null;
+  deleted_batch_id?: string | null;
   scheduled_start_at?: string;
   checkin_order_id?: string;
   order_type?: 'general' | 'checkin' | 'checkout';
@@ -90,6 +95,7 @@ export type Service = {
   completion_note?: string;
 };
 export type Evidence = {
+  attempt?: number;
   id: string;
   activity_id: string;
   item_id: string;

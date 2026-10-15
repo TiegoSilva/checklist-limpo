@@ -39,6 +39,7 @@ export async function loadData(): Promise<Data> {
     }),
   );
   const data = Object.fromEntries(result) as Data;
+  data.activities = data.activities.filter((a) => !a.deleted_at);
   data.agenda_ready = agendaReady;
   // Cache mínimo por usuário. Dados de hóspedes, notificações e auditoria não são persistidos.
   const local = {
@@ -73,6 +74,14 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (
+      ['submit_checklist', 'manage_work_order'].includes(name) &&
+      error.code === 'PGRST202'
+    ) {
+      throw new Error(
+        'Aplique a migração 202610150011_execution_and_order_management.sql no Supabase para ativar a execução simplificada e a gestão das ordens.',
+      );
+    }
     if (name === 'save_named_checklist' && error.code === 'PGRST202') {
       throw new Error(
         'Aplique a migração 202610150010_named_checklist_models.sql no Supabase para nomear e duplicar modelos.',
@@ -119,7 +128,11 @@ export type Draft = {
   revision: number;
   responses: Record<string, Response>;
   savedAt: string;
+  photos?: ExecutionPhoto[];
+  submissionId?: string;
+  attempt?: number;
 };
+export type ExecutionPhoto = { id: string; file: File; uploaded?: boolean };
 const db = () =>
   openDB('aja-private-drafts', 1, {
     upgrade(db) {
@@ -156,6 +169,7 @@ export async function uploadPhoto(
   resource: string,
   file: File,
   item?: string,
+  fileId?: string,
 ) {
   if (!supabase) throw new Error('Configure o Supabase.');
   if (
@@ -163,12 +177,14 @@ export async function uploadPhoto(
     file.size > 10 * 1024 * 1024
   )
     throw new Error('Use uma foto JPG, PNG ou WebP de até 10 MB.');
-  const id = crypto.randomUUID();
+  const id = fileId ?? crypto.randomUUID();
   const path = `${resource}/${id}`;
   const { error } = await supabase.storage
     .from(kind === 'activity' ? 'evidence' : 'service-evidence')
     .upload(path, file, { contentType: file.type, upsert: false });
-  if (error) throw error;
+  // Em uma retomada, o arquivo pode já existir mesmo sem o recibo confirmado.
+  // A API verifica o arquivo e finaliza o recibo; não dependemos do código de erro do Storage.
+  if (error && !fileId) throw error;
   const {
     data: { session },
   } = await supabase.auth.getSession();
