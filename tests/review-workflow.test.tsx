@@ -155,7 +155,7 @@ describe('revisão e preenchimento prático', () => {
     expect(
       executionIssue([item], { towel: { confirmed: true, found: 1 } }, true)
         ?.message,
-    ).toMatch(/Descreva/);
+    ).toMatch(/descreva/i);
     expect(
       executionIssue([item], { towel: { confirmed: true, found: 2 } }, false)
         ?.message,

@@ -96,7 +96,7 @@ export function initialOrderDraft(
     due: '',
     checkinTime: '13:30',
     checkinEndTime: '15:00',
-    checkoutTime: '11:30',
+    checkoutTime: '12:00',
     checkoutEndTime: '12:30',
     checkinOrder: '',
     priority: 'normal',
@@ -172,10 +172,7 @@ export function orderStepError(
         return 'Escolha o responsável pelo checkout.';
       if (plan.mode === 'checklist' && !plan.model)
         return 'Escolha um modelo ativo de check-in ou use tarefa simples.';
-      if (
-        !validTimeWindow(d.checkinTime, d.checkinEndTime) ||
-        !validTimeWindow(d.checkoutTime, d.checkoutEndTime)
-      )
+      if (!validTimeWindow(d.checkinTime, d.checkinEndTime))
         return 'Informe faixas válidas: o fim deve ser depois do início.';
     } else if (!d.due || !Number.isFinite(new Date(d.due).getTime()))
       return 'Informe a data e o horário do prazo.';
@@ -205,8 +202,8 @@ export function buildOrderPayload(data: Data, d: OrderDraft, id: string) {
           guests: d.guests,
           checkin_start_time: d.checkinTime,
           checkin_time: d.checkinEndTime,
-          checkout_start_time: d.checkoutTime,
-          checkout_time: d.checkoutEndTime,
+          checkout_start_time: '12:00',
+          checkout_time: '12:30',
           checkout_assignee: d.outAssignee,
         }
       : {
@@ -561,7 +558,7 @@ export default function WorkOrderEditor({
                       <CalendarDays size={20} />
                       <span>
                         Checkout em <strong>{shortDate(departure)}</strong>
-                        <small>Agendado automaticamente</small>
+                        <small>Agendado automaticamente · 12h–12h30</small>
                       </span>
                     </div>
                   )}
@@ -669,28 +666,6 @@ export default function WorkOrderEditor({
                           value={draft.checkinEndTime}
                           onChange={(e) =>
                             patch({ checkinEndTime: e.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Checkout · início</span>
-                        <input
-                          type="time"
-                          required
-                          value={draft.checkoutTime}
-                          onChange={(e) =>
-                            patch({ checkoutTime: e.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Checkout · fim</span>
-                        <input
-                          type="time"
-                          required
-                          value={draft.checkoutEndTime}
-                          onChange={(e) =>
-                            patch({ checkoutEndTime: e.target.value })
                           }
                         />
                       </label>
@@ -841,8 +816,7 @@ export default function WorkOrderEditor({
                           ?.name
                       }
                       <small>
-                        {shortDate(departure)} · {draft.checkoutTime}–
-                        {draft.checkoutEndTime} ·{' '}
+                        {shortDate(departure)} · 12:00–12:30 ·{' '}
                         {plan.outMode === 'checklist'
                           ? 'Itens do check-in'
                           : 'Tarefa simples'}

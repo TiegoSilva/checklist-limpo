@@ -27,7 +27,7 @@ npm.cmd run build
 3. No Supabase Auth, crie a primeira conta individual com e-mail confirmado e senha própria. Desabilite cadastro público se a operação for somente por convite. Configure URLs autorizadas e política de autenticação no painel do Supabase.
 4. Entre na plataforma e use **Criar organização**. A primeira conta recebe os perfis administrativos dessa organização.
 5. Cadastre empreendimentos, unidades, ambientes e inventário. Os nomes do briefing, como Refúgio Casinha Branca e Barra Concept Suites, são cadastrados pela interface; não são imóveis fixos no código.
-6. Crie ou convide as demais contas no Supabase Auth. Em **Equipe e acessos**, atribua suas funções e propriedades autorizadas.
+6. Em **Equipe e acessos**, convide as demais contas e atribua suas funções e propriedades autorizadas. O envio depende da migração 016 e do e-mail do Supabase configurado.
 7. Em **Modelos de checklist**, use o catálogo para criar, editar, duplicar, visualizar ou remover modelos. Todos os itens ficam na mesma lista; escolha o tipo em **Opções**.
 8. Crie uma **ordem de check-in**, informando unidade, hóspede, hóspedes e diárias. O checkout é criado automaticamente a partir do check-in. Uma tarefa simples usa somente os campos necessários.
 9. Execute com a conta atribuída. Quantidades começam com o esperado; marque o item ou ajuste quantidade/condição para conferi-lo. Fotos ficam no campo único. O rascunho é salvo automaticamente; use **Enviar para aprovação** ao terminar.
@@ -131,3 +131,13 @@ Fotos e vídeos, bloqueio antes do início e configuração por aparelho: apliqu
 Inventário vinculado às propriedades e unidades: aplique uma vez `supabase/migrations/202610160014_inventory_links.sql` após a 013, antes de publicar este frontend. O cadastro usa Propriedade → Unidade; a consulta mostra o mesmo caminho, permite editar e oferece acesso ao inventário pela unidade. A propriedade é derivada da unidade, sem duplicar a relação no banco. Alterações no inventário não modificam modelos publicados ou ordens existentes. A migração ainda precisa ser aplicada no projeto remoto.
 
 A avaliação funcional e de usabilidade está em [Relatório de avaliação do sistema — 16/10/2026](docs/AVALIACAO_DO_SISTEMA_2026-10-16.md), com as melhorias entregues, propostas priorizadas e critérios para avaliá-las.
+
+## Melhorias operacionais e uploads confirmados
+
+Aplique, após a 014, as migrações **202610160015_operational_improvements.sql** e **202610160016_team_invites.sql**, uma vez e nesta ordem. Publique frontend e APIs juntos. Essas migrações ainda não foram aplicadas no projeto remoto nesta entrega.
+
+A atualização unifica agenda e ordens, inclui tarefas nos relatórios, simplifica os checklists, permite ajustes de inventário em lote e convites da equipe. Notificações são lidas após dois segundos com a central visível. Novos checkouts e reagendamentos usam **12:00–12:30**, substituindo a regra anterior de horários editáveis.
+
+Fotos aceitam até **25 MB** e vídeos até **200 MB**, com nome, tamanho e progresso no preview. O limite global do Supabase Storage precisa permitir esses tamanhos. A vistoria só é enviada após todos os uploads e recibos serem confirmados; falhas preservam o rascunho para retomada.
+
+Veja [a entrega, os limites e o roteiro de ativação/homologação](docs/ENTREGA_MELHORIAS_2026-10-16.md).

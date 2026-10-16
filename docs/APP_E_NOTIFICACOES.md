@@ -1,5 +1,7 @@
 # Instalação, vídeos e notificações no aparelho
 
+> Atualização: a migração 015 aumenta os limites para 25 MB por foto e 200 MB por vídeo, adiciona uploads retomáveis e exige confirmação antes do envio da vistoria. O limite global do Storage também precisa permitir esses tamanhos. Consulte [o guia de ativação das melhorias](ENTREGA_MELHORIAS_2026-10-16.md).
+
 ## Ativar na produção
 
 1. Com as migrações 001 a 012 aplicadas, execute **uma vez** `supabase/migrations/202610160013_video_and_device_push.sql` no SQL Editor do projeto correto. Não reaplique as anteriores. A migração mantém os buckets privados, adiciona os metadados de vídeo e a fila de envio por organização.

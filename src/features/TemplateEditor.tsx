@@ -15,6 +15,7 @@ import { supabase, rpc, type Run } from '../lib/client';
 import QuantityStepper from './QuantityStepper';
 import { ChecklistPreview } from './ChecklistPreview';
 import { templateName, activeTemplates, duplicateItems } from './checklists';
+import { inventoryDifferences } from './inventory';
 
 export default function TemplateEditor({
   data,
@@ -56,6 +57,7 @@ export default function TemplateEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const selectedUnit = data.units.find((u) => u.id === unit);
+  const inventoryChanges = inventoryDifferences(data, unit, items);
   const changeSource = (id: string) => {
     const source = latest.find((t) => t.id === id);
     setSourceId(id);
@@ -109,6 +111,7 @@ export default function TemplateEditor({
           )
           .map((i) => ({
             id: i.id,
+            inventory_item_id: i.id,
             room: i.room,
             title: i.name,
             mode: 'count' as const,
@@ -451,7 +454,8 @@ export default function TemplateEditor({
                 <option value="">Selecione</option>
                 {data.units.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name}
+                    {data.properties.find((p) => p.id === u.property_id)?.name}{' '}
+                    · {u.name}
                   </option>
                 ))}
               </select>
@@ -475,6 +479,49 @@ export default function TemplateEditor({
             As atividades já criadas e suas respostas permanecem preservadas.
           </p>
           <section className="editor-section">
+            {inventoryChanges.length > 0 && (
+              <details className="wizard-options">
+                <summary>
+                  {inventoryChanges.length} itens para comparar com o inventário
+                </summary>
+                <p className="muted">
+                  A revisão só atualiza este rascunho. Modelos publicados e
+                  ordens existentes permanecem preservados; regras por hóspede
+                  são mantidas.
+                </p>
+                {inventoryChanges.map(({ item, current }) => (
+                  <div className="inventory-comparison" key={item.id}>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <small>
+                        {item.room} · modelo: {item.expected ?? 0} · inventário:{' '}
+                        {current.expected}
+                        {item.quantity_per_guest !== undefined
+                          ? ' · regra por hóspede mantida'
+                          : ''}
+                      </small>
+                    </div>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={saving}
+                      onClick={() =>
+                        update(item.id, {
+                          inventory_item_id: current.id,
+                          title: current.name,
+                          room: current.room,
+                          ...(item.quantity_per_guest === undefined
+                            ? { expected: current.expected }
+                            : {}),
+                        })
+                      }
+                    >
+                      Usar referência atual
+                    </button>
+                  </div>
+                ))}
+              </details>
+            )}
             <div className="editor-section-heading">
               <div>
                 <h3>Itens do checklist</h3>

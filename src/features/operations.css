@@ -1,0 +1,191 @@
+/* Controles operacionais compartilham os tokens da interface. */
+.workspace-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+.workspace-tabs button {
+  min-height: 48px;
+  padding: 0.7rem 0.9rem;
+  color: var(--muted);
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+.workspace-tabs button[aria-pressed='true'] {
+  color: var(--ink);
+  font-weight: 650;
+  border-bottom-color: var(--accent);
+}
+.workspace-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.workspace-filters .field {
+  min-width: 0;
+}
+.orders-workspace .team-agenda {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+.orders-workspace .section-heading {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0 1rem;
+}
+.orders-workspace > .workspace-filters {
+  padding: 0 1rem;
+}
+.orders-workspace > .room-section {
+  margin: 1rem;
+}
+.calendar-day {
+  display: grid;
+  gap: 0.4rem;
+  min-height: 100px;
+  min-width: 100px;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+.inventory-catalog-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.inventory-batch-list {
+  display: grid;
+  gap: 0.75rem;
+}
+.inventory-batch-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.inventory-batch-row .field {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.inventory-batch-row .field > span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.inventory-comparison {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.inventory-comparison small,
+.report-records small,
+.evidence-filename {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.report-records .simple-row {
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.report-records .simple-row > div {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.execution-next {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.3rem 1rem;
+  flex-shrink: 0;
+}
+.execution-next .button {
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+}
+.execution-photo-draft > progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+}
+.execution-photo-draft > .evidence-filename {
+  padding: 0.35rem 0.5rem;
+}
+.execution-photo-grid > .button {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.execution-photo-grid > .button small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.execution-photo-draft > span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+@media (max-width: 380px) {
+  .inventory-batch-row {
+    flex-wrap: wrap;
+  }
+  .inventory-batch-row .field {
+    flex-basis: 100%;
+  }
+  .inventory-batch-row .quantity-stepper {
+    margin-left: auto;
+  }
+}
+@media print {
+  .workspace-tabs,
+  .workspace-filters,
+  .execution-next {
+    display: none !important;
+  }
+  .report-records .simple-row {
+    break-inside: avoid;
+  }
+}
+
+.service-file-preview {
+  max-width: 420px;
+  margin: 1rem 0;
+}
+.service-file-preview img,
+.service-file-preview video {
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}
+
+.execution-modal .checklist-item.count-inline {
+  padding: 12px;
+  gap: 0.25rem 0.75rem;
+}
+.execution-modal .count-inline > .item-extras {
+  margin: 0;
+}
+.orders-workspace .section-heading p {
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.report-panel {
+  padding: clamp(16px, 3vw, 28px);
+}
+.report-panel .report-metrics span {
+  font-size: 0.875rem;
+}

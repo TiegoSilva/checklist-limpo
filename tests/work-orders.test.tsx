@@ -122,7 +122,7 @@ describe('estadia e ordens de serviço', () => {
       execution_mode: 'task',
       checkin_start_time: '13:30',
       checkin_time: '15:00',
-      checkout_start_time: '11:30',
+      checkout_start_time: '12:00',
       checkout_time: '12:30',
       description: 'Chegada ao fim da tarde',
     });

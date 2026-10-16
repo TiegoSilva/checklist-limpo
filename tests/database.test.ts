@@ -1188,7 +1188,7 @@ describe.sequential('check-in e agenda compartilhada', () => {
     expect(
       after.every(
         (a) =>
-          new Date(a.due_at).toISOString() === '2099-01-04T13:00:00.000Z' &&
+          new Date(a.due_at).toISOString() === '2099-01-04T15:30:00.000Z' &&
           a.revision === 2,
       ),
     ).toBe(true);
@@ -2110,7 +2110,7 @@ describe.sequential('checkout derivado, vínculos e janelas de execução', () =
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => [r.start_time, r.end_time])).toEqual([
       ['13:30', '15:00'],
-      ['11:30', '12:30'],
+      ['12:00', '12:30'],
     ]);
     expect(
       rows.every(
@@ -2136,7 +2136,7 @@ describe.sequential('checkout derivado, vínculos e janelas de execução', () =
         [incoming],
       )
     ).rows[0];
-    expect(agenda.checkout_start_time).toBe('11:30:00');
+    expect(agenda.checkout_start_time).toBe('12:00:00');
     expect(agenda.checkout_time).toBe('12:30:00');
     expect(
       await rpc('create_scheduled_work_order', [
@@ -2171,7 +2171,7 @@ describe.sequential('checkout derivado, vínculos e janelas de execução', () =
       ]),
     ).rejects.toThrow(/origem incompatível/);
   });
-  it('permite ao gestor ajustar a janela no dia, mesmo iniciada, preservando respostas e check-in', async () => {
+  it('mantém 12h–12h30 mesmo ao ajustar o checkout iniciado, preservando respostas e check-in', async () => {
     await asUser(worker);
     await action(activity, 'start');
     await action(activity, 'save', {
@@ -2208,13 +2208,6 @@ describe.sequential('checkout derivado, vínculos e janelas de execução', () =
       rpc('reschedule_checkout_window', [incoming, 0, JSON.stringify(change)]),
     ).rejects.toThrow(/Acesso negado/);
     await asUser(admin);
-    await expect(
-      rpc('reschedule_checkout_window', [
-        incoming,
-        0,
-        JSON.stringify({ ...change, checkout_time: '09:00' }),
-      ]),
-    ).rejects.toThrow(/fim/);
     await rpc('reschedule_checkout_window', [
       incoming,
       0,
@@ -2244,9 +2237,9 @@ describe.sequential('checkout derivado, vínculos e janelas de execução', () =
       )
     ).rows[0];
     expect(new Date(out.scheduled_start_at).toISOString()).toBe(
-      today + 'T13:30:00.000Z',
+      today + 'T15:00:00.000Z',
     );
-    expect(new Date(out.due_at).toISOString()).toBe(today + 'T14:45:00.000Z');
+    expect(new Date(out.due_at).toISOString()).toBe(today + 'T15:30:00.000Z');
     expect(after.due_at).toEqual(out.due_at);
     await expect(
       rpc('reschedule_checkout_window', [incoming, 0, JSON.stringify(change)]),
@@ -3239,7 +3232,7 @@ describe.sequential('vídeos e fila de notificações por organização', () => 
     );
     await db.exec('reset role;set role service_role;');
     await expect(
-      rpc('receive_media_evidence', [...args.slice(0, 7), 52428801]),
+      rpc('receive_media_evidence', [...args.slice(0, 7), 209715201]),
     ).rejects.toThrow(/tamanho/);
     await rpc('receive_media_evidence', args);
     await rpc('receive_media_evidence', args);
@@ -3297,7 +3290,7 @@ describe.sequential('vídeos e fila de notificações por organização', () => 
     ).rows;
     expect(buckets.find((b) => b.id === 'evidence')).toMatchObject({
       public: false,
-      file_size_limit: 52428800,
+      file_size_limit: 209715200,
     });
     expect(
       buckets.find((b) => b.id === 'evidence')?.allowed_mime_types,
@@ -3632,6 +3625,416 @@ describe.sequential('inventário por unidade e propriedade', () => {
         payload(foreignUnit, { id, revision: 0 }),
         /mesma organização/,
       );
+    });
+  });
+});
+
+describe.sequential('melhorias operacionais da migração 015', () => {
+  it('marca somente notificações do próprio usuário e mantém a data da primeira leitura', async () => {
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      const mine = await rpc('notify', [admin, null, 'Aviso lido', 'Teste']);
+      void mine;
+      await rpc('notify', [worker, null, 'Aviso de outro usuário', 'Teste']);
+      const ids = (
+        await db.query<{ id: string }>(
+          'select id from notifications where title in($1,$2)',
+          ['Aviso lido', 'Aviso de outro usuário'],
+        )
+      ).rows.map((n) => n.id);
+      await asUser(admin);
+      expect(await rpc('read_notifications', [ids])).toBe(1);
+      expect(await rpc('read_notifications', [ids])).toBe(0);
+      await db.exec('reset role');
+      expect(
+        (
+          await db.query<{ read_at: unknown }>(
+            'select read_at from notifications where title=$1',
+            ['Aviso de outro usuário'],
+          )
+        ).rows[0].read_at,
+      ).toBeNull();
+    });
+  });
+  it('pagina mais de mil itens no servidor, mantém RLS e rejeita nomes de tabela arbitrários', async () => {
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      await db.query(
+        "insert into inventory_items(unit_id,name,room,category,expected) select $1,'Item '||g,'Geral','permanent',g from generate_series(1,1201) g",
+        [unit],
+      );
+      await asUser(worker);
+      const first = (await rpc('operation_page', [
+        'inventory_items',
+        property,
+        0,
+        500,
+      ])) as { total: number; rows: { id: string }[] };
+      const last = (await rpc('operation_page', [
+        'inventory_items',
+        property,
+        1000,
+        500,
+      ])) as { total: number; rows: { id: string }[] };
+      expect(first.total).toBeGreaterThanOrEqual(1201);
+      expect(first.rows).toHaveLength(500);
+      expect(last.rows.length).toBeGreaterThanOrEqual(201);
+      expect(last.rows.some((r) => first.rows.some((a) => a.id === r.id))).toBe(
+        false,
+      );
+      await db.exec('savepoint pagination_scope');
+      await expect(
+        rpc('operation_page', ['auth.users', null, 0, 500]),
+      ).rejects.toThrow(/inválido/);
+      await db.exec('rollback to savepoint pagination_scope');
+      expect(
+        (
+          (await rpc('operation_page', [
+            'inventory_items',
+            crypto.randomUUID(),
+            0,
+            500,
+          ])) as { total: number }
+        ).total,
+      ).toBe(0);
+    });
+  });
+  it('edita cadastros com revisão e não permite perder alterações recentes', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      await rpc('save_location', [
+        'unit',
+        JSON.stringify({
+          id: unit,
+          revision: 0,
+          name: 'Unidade atualizada',
+          capacity: 9,
+          base_occupancy: 2,
+        }),
+      ]);
+      await db.exec('savepoint location_version');
+      await expect(
+        rpc('save_location', [
+          'unit',
+          JSON.stringify({
+            id: unit,
+            revision: 0,
+            name: 'Outra edição',
+            capacity: 9,
+            base_occupancy: 2,
+          }),
+        ]),
+      ).rejects.toThrow(/alterada/);
+      await db.exec('rollback to savepoint location_version');
+      expect(
+        (
+          await db.query<{ name: string }>(
+            'select name from units where id=$1',
+            [unit],
+          )
+        ).rows[0].name,
+      ).toBe('Unidade atualizada');
+      await asUser(outsider);
+      await expect(
+        rpc('save_location', [
+          'property',
+          JSON.stringify({
+            id: property,
+            revision: 0,
+            name: 'Propriedade alheia',
+            address: '',
+          }),
+        ]),
+      ).rejects.toThrow(/Acesso negado/);
+    });
+  });
+  it('salva inventário em lote de forma atômica e idempotente, sem duplicar na retomada', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const batch = crypto.randomUUID(),
+        items = JSON.stringify([
+          {
+            name: 'Item de lote A',
+            room: 'Geral',
+            category: 'linen',
+            expected: 3,
+          },
+          {
+            name: 'Item de lote B',
+            room: 'Geral',
+            category: 'permanent',
+            expected: 5,
+          },
+        ]);
+      await rpc('save_inventory_batch', [unit, items, batch]);
+      await rpc('save_inventory_batch', [unit, items, batch]);
+      expect(
+        (
+          await db.query(
+            'select id from inventory_items where unit_id=$1 and name like $2',
+            [unit, 'Item de lote %'],
+          )
+        ).rows,
+      ).toHaveLength(2);
+      await db.exec('savepoint atomic_inventory');
+      await expect(
+        rpc('save_inventory_batch', [
+          unit,
+          JSON.stringify([
+            {
+              name: 'Não pode persistir',
+              room: 'Geral',
+              category: 'permanent',
+              expected: 2,
+            },
+            {
+              name: 'Inválido',
+              room: 'Geral',
+              category: 'permanent',
+              expected: -1,
+            },
+          ]),
+          crypto.randomUUID(),
+        ]),
+      ).rejects.toThrow(/quantidade/);
+      await db.exec('rollback to savepoint atomic_inventory');
+      expect(
+        (
+          await db.query('select id from inventory_items where name=$1', [
+            'Não pode persistir',
+          ])
+        ).rows,
+      ).toHaveLength(0);
+    });
+  });
+  it('não envia checklist enquanto qualquer arquivo do manifesto estiver sem recibo', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const target = (await rpc('configure', [
+        'unit',
+        JSON.stringify({
+          property_id: property,
+          name: 'Manifesto de evidências',
+          capacity: 2,
+          base_occupancy: 2,
+        }),
+      ])) as string;
+      const model = await rpc('save_named_checklist', [
+        JSON.stringify({
+          unit_id: target,
+          kind: 'cleaning',
+          name: 'Manifesto',
+          items: [sharedCup],
+        }),
+      ]);
+      const order = await rpc('create_scheduled_work_order', [
+        JSON.stringify({
+          unit_id: target,
+          order_type: 'checkin',
+          execution_mode: 'checklist',
+          template_id: model,
+          assignee: worker,
+          checkout_assignee: worker,
+          guest_name: 'Teste',
+          checkin: '2020-01-01',
+          duration_nights: 1,
+          guests: 2,
+        }),
+      ]);
+      const activity = (
+        await db.query<{ activity_id: string }>(
+          'select activity_id from service_orders where id=$1',
+          [order],
+        )
+      ).rows[0].activity_id;
+      await asUser(worker);
+      await action(activity, 'start');
+      const responses = JSON.stringify({
+          cup: { confirmed: true, found: 4, condition: 'ok' },
+        }),
+        file = crypto.randomUUID(),
+        submission = crypto.randomUUID();
+      await db.exec('savepoint pending_receipt');
+      await expect(
+        rpc('submit_checklist_with_evidence', [
+          activity,
+          1,
+          submission,
+          responses,
+          [file],
+        ]),
+      ).rejects.toThrow(/ainda não confirmado/);
+      await db.exec('rollback to savepoint pending_receipt');
+      expect(
+        (
+          await db.query<{ status: string }>(
+            'select status from activities where id=$1',
+            [activity],
+          )
+        ).rows[0].status,
+      ).toBe('in_progress');
+      await db.query(
+        "insert into storage.objects(bucket_id,name) values('evidence',$1)",
+        [`${activity}/${file}`],
+      );
+      await db.exec('reset role;set role service_role');
+      await rpc('receive_media_evidence', [
+        worker,
+        activity,
+        'activity',
+        '__activity__',
+        file,
+        'a'.repeat(64),
+        'video/mp4',
+        200 * 1024 * 1024,
+      ]);
+      await asUser(worker);
+      const forgotten = crypto.randomUUID();
+      await rpc('expect_evidence_uploads', [
+        'activity',
+        activity,
+        [file, forgotten],
+      ]);
+      expect(
+        await rpc('pending_evidence_uploads', ['activity', activity]),
+      ).toEqual([forgotten]);
+      await db.exec('savepoint legacy_upload_gate');
+      await expect(
+        rpc('submit_checklist', [activity, 1, submission, responses]),
+      ).rejects.toThrow(/aguardando upload/);
+      await db.exec('rollback to savepoint legacy_upload_gate');
+      await rpc('cancel_evidence_upload', ['activity', activity, forgotten]);
+      expect(
+        await rpc('pending_evidence_uploads', ['activity', activity]),
+      ).toEqual([]);
+      await asUser(worker);
+      expect(
+        await rpc('submit_checklist_with_evidence', [
+          activity,
+          1,
+          submission,
+          responses,
+          [file],
+        ]),
+      ).toBe(2);
+      expect(
+        await rpc('submit_checklist_with_evidence', [
+          activity,
+          1,
+          submission,
+          responses,
+          [file],
+        ]),
+      ).toBe(2);
+    });
+  });
+});
+
+describe.sequential('convites administrativos da migração 016', () => {
+  it('recusa convite de gestor sem administração e propriedades de outra organização', async () => {
+    await rollbackAfter(async () => {
+      const payload = {
+        request_id: crypto.randomUUID(),
+        org_id: org,
+        email: 'novo@aja.test',
+        name: 'Novo membro',
+        roles: ['cleaner'],
+        properties: [property],
+      };
+      await asUser(worker);
+      await db.exec('savepoint invite_scope');
+      await expect(
+        rpc('prepare_team_invite', [JSON.stringify(payload)]),
+      ).rejects.toThrow(/administradores/);
+      await db.exec('rollback to savepoint invite_scope');
+      await asUser(admin);
+      await expect(
+        rpc('prepare_team_invite', [
+          JSON.stringify({ ...payload, properties: [crypto.randomUUID()] }),
+        ]),
+      ).rejects.toThrow(/desta organização/);
+    });
+  });
+  it('prepara convite sem dar acesso antes de a conta existir e conclui com o escopo escolhido', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const request = crypto.randomUUID(),
+        payload = {
+          request_id: request,
+          org_id: org,
+          email: 'convidado@aja.test',
+          name: 'Pessoa convidada',
+          roles: ['cleaner'],
+          properties: [property],
+        };
+      const prepared = (await rpc('prepare_team_invite', [
+        JSON.stringify(payload),
+      ])) as { existing: boolean; needs_link: boolean };
+      expect(prepared).toMatchObject({ existing: false, needs_link: true });
+      await db.exec('savepoint invite_pending');
+      await expect(rpc('finish_team_invite', [request])).rejects.toThrow(
+        /Crie primeiro/,
+      );
+      await db.exec('rollback to savepoint invite_pending');
+      const newUser = crypto.randomUUID();
+      await db.exec('reset role');
+      await db.query('insert into auth.users values($1,$2)', [
+        newUser,
+        payload.email,
+      ]);
+      await asUser(admin);
+      await rpc('finish_team_invite', [request]);
+      await rpc('finish_team_invite', [request]);
+      const member = (
+        await db.query<{ roles: string[] }>(
+          'select roles from memberships where org_id=$1 and user_id=$2',
+          [org, newUser],
+        )
+      ).rows[0];
+      expect(member.roles).toEqual(['cleaner']);
+      await asUser(newUser);
+      expect(
+        (await db.query('select id from properties where id=$1', [property]))
+          .rows,
+      ).toHaveLength(1);
+    });
+  });
+});
+
+describe.sequential('consultas históricas sob demanda', () => {
+  it('inclui ordens abertas antigas sem carregar concluídas antigas na visão do dia', async () => {
+    await rollbackAfter(async () => {
+      await db.exec('reset role');
+      const pending = crypto.randomUUID(),
+        completed = crypto.randomUUID();
+      await db.query(
+        "insert into service_orders(id,unit_id,title,description,assignee,due_at,created_by,status) values($1,$3,'Aberta antiga','Teste',$4,'2020-01-01',$5,'assigned'),($2,$3,'Concluída antiga','Teste',$4,'2020-01-01',$5,'approved')",
+        [pending, completed, unit, worker, admin],
+      );
+      await asUser(worker);
+      const open = (await rpc('operation_page', [
+        'service_orders',
+        property,
+        0,
+        500,
+        null,
+        null,
+        'due_at',
+        true,
+      ])) as { rows: { id: string }[] };
+      expect(open.rows.some((r) => r.id === pending)).toBe(true);
+      expect(open.rows.some((r) => r.id === completed)).toBe(false);
+      const historic = (await rpc('operation_page', [
+        'service_orders',
+        property,
+        0,
+        500,
+        '2019-12-31',
+        '2020-01-02',
+        'due_at',
+        false,
+      ])) as { rows: { id: string }[] };
+      expect(historic.rows.some((r) => r.id === completed)).toBe(true);
     });
   });
 });

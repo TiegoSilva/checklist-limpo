@@ -42,10 +42,10 @@ describe('evidências de foto ou vídeo', () => {
   it('aplica os limites distintos antes de armazenar ou enviar', () => {
     expect(mediaError({ type: 'video/mp4', size: VIDEO_LIMIT })).toBeNull();
     expect(mediaError({ type: 'video/mp4', size: VIDEO_LIMIT + 1 })).toMatch(
-      /50 MB/,
+      /200 MB/,
     );
     expect(mediaError({ type: 'image/png', size: PHOTO_LIMIT + 1 })).toMatch(
-      /10 MB/,
+      /25 MB/,
     );
     expect(mediaError({ type: 'video/mp4', size: 0 })).not.toBeNull();
     expect(mediaError({ type: 'text/html', size: 20 })).not.toBeNull();
@@ -77,7 +77,7 @@ describe('evidências de foto ou vídeo', () => {
     expect(html).toContain('Adicionar vídeo');
     expect(html).toContain('video/mp4,video/quicktime,video/webm');
     expect(html).toContain('Vídeo');
-    expect(html).toContain('50 MB');
+    expect(html).toContain('200 MB');
   });
 });
 describe('início obrigatório e instalação', () => {

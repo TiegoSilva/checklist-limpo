@@ -21,6 +21,7 @@ export default function InventoryCatalog({
   onOpenUnit,
   onOpenProperty,
   canManageUnit = () => manager,
+  onBatch,
 }: {
   data: Data;
   property: string;
@@ -34,6 +35,7 @@ export default function InventoryCatalog({
   onOpenUnit: (id: string) => void;
   onOpenProperty: (id: string) => void;
   canManageUnit?: (id: string) => boolean;
+  onBatch?: () => void;
 }) {
   const groups = inventoryGroups(data, property, unit, search);
   const total = groups.reduce((count, group) => count + group.items.length, 0);
@@ -72,6 +74,13 @@ export default function InventoryCatalog({
           </button>
         )}
       </div>
+      {manager && onBatch && (
+        <div className="inventory-catalog-actions">
+          <button className="button secondary" onClick={onBatch}>
+            Ajustar ou copiar itens em lote
+          </button>
+        </div>
+      )}
       {groups.map((group) => (
         <section
           className="inventory-group"

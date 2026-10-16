@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Camera, Image, Video, X } from 'lucide-react';
 import type { Evidence } from '../domain';
-import type { ExecutionPhoto } from '../lib/client';
+import type { ExecutionPhoto, UploadProgress } from '../lib/client';
 import { MAX_EXECUTION_PHOTOS } from './execution';
-import { mediaError, isVideo, PHOTO_TYPES, VIDEO_TYPES } from '../lib/media';
+import {
+  mediaError,
+  isVideo,
+  PHOTO_TYPES,
+  VIDEO_TYPES,
+  fileSize,
+} from '../lib/media';
 
-function PhotoDraft({ photo }: { photo: ExecutionPhoto }) {
+export function PhotoDraft({ photo }: { photo: ExecutionPhoto }) {
   const [url, setUrl] = useState('');
   useEffect(() => {
     const next = URL.createObjectURL(photo.file);
@@ -17,11 +23,14 @@ function PhotoDraft({ photo }: { photo: ExecutionPhoto }) {
       controls
       playsInline
       preload="metadata"
-      src={url}
+      src={url || undefined}
       aria-label={photo.file.name || 'Vídeo no rascunho'}
     />
   ) : (
-    <img src={url} alt={photo.file.name || 'Foto da vistoria no rascunho'} />
+    <img
+      src={url || undefined}
+      alt={photo.file.name || 'Foto da vistoria no rascunho'}
+    />
   );
 }
 export default function ExecutionPhotos({
@@ -32,6 +41,7 @@ export default function ExecutionPhotos({
   onChange,
   onError,
   onView,
+  uploads = {},
 }: {
   photos: ExecutionPhoto[];
   evidence: Evidence[];
@@ -40,6 +50,7 @@ export default function ExecutionPhotos({
   onChange: (photos: ExecutionPhoto[]) => void;
   onError: (error: string) => void;
   onView: (photo: Evidence) => Promise<void>;
+  uploads?: Record<string, UploadProgress>;
 }) {
   const current = evidence.filter((e) => !e.attempt || e.attempt === attempt);
   const pending = photos.filter((p) => !evidence.some((e) => e.id === p.id));
@@ -52,7 +63,10 @@ export default function ExecutionPhotos({
       );
       return;
     }
-    const invalid = files.map(mediaError).find(Boolean);
+    const bad = files.find((file) => mediaError(file));
+    const invalid = bad
+      ? `Arquivo “${bad.name}” (${fileSize(bad.size)}): ${mediaError(bad)}`
+      : null;
     if (invalid) {
       onError(invalid);
       return;
@@ -73,8 +87,8 @@ export default function ExecutionPhotos({
         </small>
       </h3>
       <p className="muted">
-        Envie fotos ou vídeos. Até 8 arquivos por envio: fotos de até 10 MB ou
-        vídeos de até 50 MB.
+        Até 8 arquivos por envio: fotos de até 25 MB ou vídeos de até 200 MB. A
+        aprovação só é solicitada após a confirmação de todos os arquivos.
       </p>
       <div className="execution-photo-grid">
         {current.map((e, index) => (
@@ -85,6 +99,7 @@ export default function ExecutionPhotos({
           >
             {isVideo(e.mime_type) ? <Video size={17} /> : <Image size={17} />}
             {isVideo(e.mime_type) ? 'Vídeo' : 'Foto'} {index + 1}
+            <small>{fileSize(e.file_size)} · Recebido</small>
           </button>
         ))}
         {pending.map((photo, index) => (
@@ -92,9 +107,23 @@ export default function ExecutionPhotos({
             <PhotoDraft photo={photo} />
             <span>
               {isVideo(photo.file.type) ? 'Vídeo' : 'Foto'}{' '}
-              {current.length + index + 1} ·{' '}
-              {photo.uploaded ? 'Recebida' : 'No rascunho'}
+              {current.length + index + 1} · {fileSize(photo.file.size)} ·{' '}
+              {photo.uploaded
+                ? 'Recebido'
+                : uploads[photo.id]?.phase === 'receipt'
+                  ? 'Confirmando recebimento…'
+                  : uploads[photo.id]
+                    ? `Enviando ${uploads[photo.id].percent}%`
+                    : 'No rascunho'}
             </span>
+            <small className="evidence-filename">{photo.file.name}</small>
+            {uploads[photo.id] && !photo.uploaded && (
+              <progress
+                max={100}
+                value={uploads[photo.id].percent}
+                aria-label={`Envio de ${photo.file.name}`}
+              />
+            )}
             {editable && !photo.uploaded && (
               <button
                 className="icon-button"

@@ -13,6 +13,7 @@ vi.mock('web-push', () => ({
 }));
 import evidence from '../api/evidence';
 import notifications from '../api/notifications';
+import teamInvite from '../api/team-invite';
 const user = '00000000-0000-4000-8000-000000000001',
   resource = '00000000-0000-4000-8000-000000000002',
   fileId = '00000000-0000-4000-8000-000000000003';
@@ -243,5 +244,81 @@ describe('API de evidências e notificações', () => {
     );
     expect(res.statusCode).toBe(404);
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('API de convites com administração validada', () => {
+  const payload = {
+    request_id: fileId,
+    org_id: resource,
+    email: 'novo@aja.test',
+    name: 'Novo membro',
+    roles: ['cleaner'],
+    properties: [],
+  };
+  it('não envia e-mail se a verificação de administração recusar o pedido', async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { message: 'Acesso negado', code: '42501' },
+    }));
+    mocks.clients.push({ ...auth, rpc });
+    const res = response();
+    await teamInvite(request(payload), res as unknown as VercelResponse);
+    expect(res.statusCode).toBe(422);
+    expect(mocks.clients).toHaveLength(0);
+  });
+  it('só informa sucesso depois de confirmar o convite e a atribuição dos acessos', async () => {
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          id: fileId,
+          email: payload.email,
+          existing: false,
+          complete: false,
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    const send = vi.fn(async () => ({
+      data: { user: { id: user } },
+      error: null,
+    }));
+    mocks.clients.push(
+      { ...auth, rpc },
+      { auth: { admin: { inviteUserByEmail: send } } },
+    );
+    const res = response();
+    await teamInvite(request(payload), res as unknown as VercelResponse);
+    expect(send).toHaveBeenCalledWith(payload.email, {
+      data: { name: payload.name },
+    });
+    expect(rpc).toHaveBeenLastCalledWith('finish_team_invite', {
+      invitation: fileId,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+  it('não configura acessos nem informa sucesso quando o envio do convite falha', async () => {
+    const rpc = vi.fn(async () => ({
+      data: { id: fileId, existing: false, complete: false },
+      error: null,
+    }));
+    mocks.clients.push(
+      { ...auth, rpc },
+      {
+        auth: {
+          admin: {
+            inviteUserByEmail: vi.fn(async () => ({
+              error: { message: 'SMTP indisponível' },
+            })),
+          },
+        },
+      },
+    );
+    const res = response();
+    await teamInvite(request(payload), res as unknown as VercelResponse);
+    expect(res.statusCode).toBe(502);
+    expect(res.body.code).toBe('INVITE_EMAIL');
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 });

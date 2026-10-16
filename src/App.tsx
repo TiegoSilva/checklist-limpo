@@ -47,6 +47,7 @@ import {
 } from './domain';
 import { Empty, Form, Modal, Badge } from './components';
 import DeviceSettings from './features/DeviceSettings';
+import useReadNotifications from './features/useReadNotifications';
 import { disablePush } from './lib/push';
 import { MemberEditor, ServiceDetail } from './management';
 import TemplateEditor from './features/TemplateEditor';
@@ -57,24 +58,26 @@ import ChecklistCatalog from './features/ChecklistCatalog';
 import ChecklistPreviewDialog from './features/ChecklistPreview';
 import InventoryEditor from './features/InventoryEditor';
 import InventoryCatalog from './features/InventoryCatalog';
+import InventoryBatchEditor from './features/InventoryBatchEditor';
+import LocationEditor from './features/LocationEditor';
+import AccountPassword from './features/AccountPassword';
 import {
   inventoryManagementScope,
   type InventoryItem,
 } from './features/inventory';
-import StayAgenda from './features/StayAgenda';
+import OrdersWorkspace from './features/OrdersWorkspace';
+import { matchesSearch } from './lib/search';
 import WorkOrderEditor from './features/WorkOrderEditor';
 import TodayStayOrders from './features/TodayStayOrders';
 import WorkOrderCard from './features/WorkOrderCard';
 import { pendingApprovals } from './features/operation';
-import { DeletedOrders } from './features/OrderManagement';
 
 const navigation = [
   { path: '/', label: 'Visão geral', icon: LayoutDashboard },
   { path: '/meu-dia', label: 'Meu dia', icon: CalendarDays },
-  { path: '/atividades', label: 'Agenda de execução', icon: ClipboardList },
   { path: '/aprovacoes', label: 'Aprovações', icon: ClipboardCheck },
   { path: '/propriedades', label: 'Propriedades', icon: House },
-  { path: '/servicos', label: 'Ordens de serviço', icon: Wrench },
+  { path: '/servicos', label: 'Agenda e ordens', icon: Wrench },
   { path: '/dispositivo', label: 'App no aparelho', icon: Smartphone },
 ];
 const management = [
@@ -144,16 +147,24 @@ function Portal({ session }: { session: Session }) {
   const [search, setSearch] = useState('');
   const [property, setProperty] = useState('');
   const [filter, setFilter] = useState('Hoje');
+  const [history, setHistory] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState('');
   const [inventoryItem, setInventoryItem] = useState<InventoryItem>();
   const [inventoryInitialUnit, setInventoryInitialUnit] = useState('');
+  const [editingLocation, setEditingLocation] = useState<{
+    kind: 'property' | 'unit';
+    id: string;
+  } | null>(null);
   const [service, setService] = useState<Service | null>(null);
-  const [calendar, setCalendar] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const path = location.pathname;
+  useEffect(() => {
+    setSearch('');
+    setHistory(false);
+  }, [path]);
   const inventoryUnit =
     path === '/inventario'
       ? (new URLSearchParams(location.search).get('unidade') ?? '')
@@ -185,13 +196,40 @@ function Portal({ session }: { session: Session }) {
   }, [selected, service, modal, navigate]);
   const qc = useQueryClient();
   const query = useQuery({
-    queryKey: ['operation', session?.user.id],
-    queryFn: loadData,
+    queryKey: [
+      'operation',
+      session?.user.id,
+      property,
+      path === '/auditoria',
+      history,
+      path === '/relatorios',
+      path === '/' && filter === 'Concluídas',
+    ],
+    queryFn: () =>
+      loadData(
+        property,
+        path === '/auditoria',
+        history ||
+          path === '/relatorios' ||
+          (path === '/' && filter === 'Concluídas'),
+      ),
     enabled: Boolean(session),
     refetchInterval: 60000,
   });
   const data = query.data ?? emptyData;
   const user = session?.user.id ?? '';
+  const readNotices = useCallback(
+    async (ids: string[]) => {
+      await rpc('read_notifications', { notification_ids: ids });
+      await qc.invalidateQueries({ queryKey: ['operation', user] });
+    },
+    [qc, user],
+  );
+  useReadNotifications(
+    path === '/notificacoes' && online && !modal && !selected && !service,
+    data.notifications,
+    readNotices,
+  );
   const profile = data.profiles.find((p) => p.id === user);
   const memberships = data.memberships.filter((m) => m.user_id === user);
   const manager = memberships.some((m) =>
@@ -322,9 +360,10 @@ function Portal({ session }: { session: Session }) {
       a.status !== 'cancelled' &&
       (!property ||
         data.units.find((u) => u.id === a.unit_id)?.property_id === property) &&
-      `${unitName(a.unit_id)} ${propertyName(a.unit_id)} ${a.title} ${person(a.assignee)}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
+      matchesSearch(
+        `${unitName(a.unit_id)} ${propertyName(a.unit_id)} ${a.title} ${person(a.assignee)}`,
+        search,
+      ),
   );
   const inPeriod = (a: { status: string; due_at: string }) => {
     if (filter === 'Concluídas')
@@ -346,15 +385,15 @@ function Portal({ session }: { session: Session }) {
     );
   };
   const daily = visible.filter(inPeriod);
-  const myActivities = daily.filter((a) => a.assignee === user);
   const filteredOrders = data.service_orders.filter(
     (s) =>
       !s.deleted_at &&
       (!property ||
         data.units.find((u) => u.id === s.unit_id)?.property_id === property) &&
-      `${s.title} ${unitName(s.unit_id)} ${person(s.assignee)}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
+      matchesSearch(
+        `${s.title} ${unitName(s.unit_id)} ${propertyName(s.unit_id)} ${person(s.assignee)}`,
+        search,
+      ),
   );
   const taskOrders = filteredOrders.filter(
     (s) => !s.activity_id && s.status !== 'cancelled',
@@ -1014,100 +1053,18 @@ function Portal({ session }: { session: Session }) {
               </div>
             </>
           )}
-          {['/', '/atividades', '/meu-dia'].includes(path) && (
-            <StayAgenda
+          {['/servicos', '/atividades', '/meu-dia'].includes(path) && (
+            <OrdersWorkspace
               data={data}
-              manager={manager}
               property={property}
+              search={search}
+              manager={manager}
+              user={user}
+              mine={path === '/meu-dia'}
               run={run}
+              render={executionList}
+              onHistory={setHistory}
             />
-          )}
-          {['/atividades', '/meu-dia'].includes(path) && (
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h2>
-                    {path === '/meu-dia'
-                      ? 'Suas atividades'
-                      : 'Agenda operacional'}{' '}
-                    <span className="count-pill">
-                      {path === '/meu-dia'
-                        ? myActivities.length +
-                          dailyTasks.filter((s) => s.assignee === user).length
-                        : daily.length + dailyTasks.length}
-                    </span>
-                  </h2>
-                  <p>Atrasadas e urgentes aparecem primeiro.</p>
-                </div>
-                <button
-                  className="button secondary"
-                  onClick={() => setCalendar(!calendar)}
-                >
-                  <CalendarDays size={16} />
-                  {calendar ? 'Lista' : 'Calendário'}
-                </button>
-              </div>
-              <div className="tabs">
-                {['Hoje', 'Amanhã', 'Semana', 'Atrasadas', 'Concluídas'].map(
-                  (f) => (
-                    <button
-                      key={f}
-                      className={filter === f ? 'selected' : ''}
-                      onClick={() => setFilter(f)}
-                    >
-                      {f}
-                    </button>
-                  ),
-                )}
-              </div>
-              {calendar && (
-                <div className="week-strip">
-                  {Array.from({ length: 7 }, (_, i) => {
-                    const d = new Date();
-                    d.setDate(d.getDate() + i);
-                    return (
-                      <div key={i}>
-                        <small>
-                          {new Intl.DateTimeFormat('pt-BR', {
-                            weekday: 'short',
-                          }).format(d)}
-                        </small>
-                        <strong>{d.getDate()}</strong>
-                        <span>
-                          {visible.filter(
-                            (a) => dayKey(new Date(a.due_at)) === dayKey(d),
-                          ).length +
-                            taskOrders.filter(
-                              (s) => dayKey(new Date(s.due_at)) === dayKey(d),
-                            ).length}{' '}
-                          atividades
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {(path === '/meu-dia' ? myActivities : daily).length +
-              dailyTasks.filter(
-                (s) => path !== '/meu-dia' || s.assignee === user,
-              ).length ? (
-                executionList(
-                  path === '/meu-dia' ? myActivities : daily,
-                  dailyTasks.filter(
-                    (s) => path !== '/meu-dia' || s.assignee === user,
-                  ),
-                )
-              ) : (
-                <Empty
-                  title="Nenhuma atividade neste período"
-                  description={
-                    path === '/meu-dia'
-                      ? 'As atividades atribuídas a você aparecerão automaticamente aqui.'
-                      : 'Crie uma ordem e atribua um responsável para começar.'
-                  }
-                />
-              )}
-            </section>
           )}
           {path === '/aprovacoes' && (
             <section className="panel">
@@ -1136,7 +1093,13 @@ function Portal({ session }: { session: Session }) {
                 .filter(
                   (p) =>
                     (!property || p.id === property) &&
-                    p.name.toLowerCase().includes(search.toLowerCase()),
+                    matchesSearch(
+                      `${p.name} ${p.address} ${data.units
+                        .filter((u) => u.property_id === p.id)
+                        .map((u) => u.name)
+                        .join(' ')}`,
+                      search,
+                    ),
                 )
                 .map((p) => (
                   <section className="panel property-card" key={p.id}>
@@ -1146,6 +1109,16 @@ function Portal({ session }: { session: Session }) {
                     </div>
                     <div className="property-card-body">
                       <h2>{p.name}</h2>
+                      {manager && (
+                        <button
+                          className="button secondary"
+                          onClick={() =>
+                            setEditingLocation({ kind: 'property', id: p.id })
+                          }
+                        >
+                          Editar propriedade
+                        </button>
+                      )}
                       <p>{p.address || 'Endereço não informado'}</p>
                       {data.units
                         .filter((u) => u.property_id === p.id)
@@ -1203,42 +1176,6 @@ function Portal({ session }: { session: Session }) {
               )}
             </div>
           )}
-          {path === '/servicos' && (
-            <section className="panel orders-panel">
-              <div className="section-heading">
-                <h2>Ordens de serviço</h2>
-                <span className="count-pill">
-                  {
-                    filteredOrders.filter((s) => s.status !== 'cancelled')
-                      .length
-                  }{' '}
-                  ordens
-                </span>
-              </div>
-              {filteredOrders
-                .filter((s) => s.status !== 'cancelled')
-                .map(orderCard)}
-              {!filteredOrders.some((s) => s.status !== 'cancelled') && (
-                <Empty
-                  title="Nenhuma ordem de serviço"
-                  description="Crie ordens com modelos de checklist ou tarefas simples."
-                  action={() => open('service')}
-                  label="Abrir ordem de serviço"
-                />
-              )}
-              {filteredOrders.some((s) => s.status === 'cancelled') && (
-                <details className="room-section">
-                  <summary>Histórico de ordens canceladas</summary>
-                  {filteredOrders
-                    .filter((s) => s.status === 'cancelled')
-                    .map(orderCard)}
-                </details>
-              )}
-              {manager && (
-                <DeletedOrders data={data} run={run} property={property} />
-              )}
-            </section>
-          )}
           {path === '/inventario' && (
             <InventoryCatalog
               data={data}
@@ -1250,6 +1187,7 @@ function Portal({ session }: { session: Session }) {
                 inventoryManagementData.units.some((u) => u.id === id)
               }
               onUnitChange={changeInventoryUnit}
+              onBatch={() => setModal('inventory-batch')}
               onClearFilters={() => {
                 setSearch('');
                 setProperty('');
@@ -1339,7 +1277,10 @@ function Portal({ session }: { session: Session }) {
                     onClick={() =>
                       void run(async () => {
                         await rpc('read_notification', { notification: n.id });
-                        if (n.activity_id) setSelected(n.activity_id);
+                        if (n.activity_id) {
+                          setHistory(true);
+                          setSelected(n.activity_id);
+                        }
                       }, 'Notificação lida.')
                     }
                   >
@@ -1543,6 +1484,7 @@ function Portal({ session }: { session: Session }) {
         <Modal title="Sua conta" onClose={() => setModal(null)}>
           <h3>{profile?.name}</h3>
           <p>{session?.user.email}</p>
+          <AccountPassword />
           <NavLink
             className="button secondary full"
             to="/perfil"
@@ -1671,6 +1613,17 @@ function Portal({ session }: { session: Session }) {
             <ArrowRight size={17} />
           </NavLink>
           <h3>Ambientes</h3>
+          {manager && (
+            <button
+              className="button secondary"
+              onClick={() => {
+                setModal(null);
+                setEditingLocation({ kind: 'unit', id: selectedUnit });
+              }}
+            >
+              Editar unidade
+            </button>
+          )}
           {data.environments
             .filter((e) => e.unit_id === selectedUnit)
             .map((e) => (
@@ -1705,6 +1658,29 @@ function Portal({ session }: { session: Session }) {
           onClose={() => setModal(null)}
         />
       )}
+      {modal === 'inventory-batch' && (
+        <InventoryBatchEditor
+          data={inventoryManagementData}
+          initialUnit={inventoryUnit}
+          run={run}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {editingLocation &&
+        (() => {
+          const target =
+            editingLocation.kind === 'unit'
+              ? data.units.find((u) => u.id === editingLocation.id)
+              : data.properties.find((p) => p.id === editingLocation.id);
+          return target ? (
+            <LocationEditor
+              kind={editingLocation.kind}
+              location={target}
+              run={run}
+              onClose={() => setEditingLocation(null)}
+            />
+          ) : null;
+        })()}
       {modal === 'member' && (
         <MemberEditor data={data} run={run} onClose={() => setModal(null)} />
       )}

@@ -1,5 +1,7 @@
 # Avaliação do sistema AJA Anfitrião
 
+> Atualização: as propostas desta avaliação foram implementadas no código, com homologação remota ainda pendente. Consulte [a entrega e o roteiro de ativação](ENTREGA_MELHORIAS_2026-10-16.md). O texto abaixo preserva o diagnóstico anterior às mudanças.
+
 **Data:** 16 de outubro de 2026  
 **Objetivo:** reduzir dúvidas, preenchimento repetitivo e navegação desnecessária, com prioridade para o uso no celular.
 

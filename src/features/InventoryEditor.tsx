@@ -164,6 +164,20 @@ export default function InventoryEditor({
               onChange={(e) => setName(e.target.value)}
             />
           </label>
+          {data.inventory_items.some(
+            (existing) =>
+              existing.id !== item?.id &&
+              existing.unit_id === unit &&
+              existing.active !== false &&
+              existing.name.trim().toLowerCase() ===
+                name.trim().toLowerCase() &&
+              existing.room.trim().toLowerCase() === room.trim().toLowerCase(),
+          ) && (
+            <p role="status" className="inventory-hint">
+              Já existe um item com esse nome neste ambiente. Confira o cadastro
+              para evitar duplicação.
+            </p>
+          )}
           <div className="field inventory-quantity-field">
             <span>Quantidade padrão</span>
             <QuantityStepper

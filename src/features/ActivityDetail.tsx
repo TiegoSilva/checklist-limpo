@@ -25,7 +25,9 @@ import {
   sendExecution,
 } from './execution';
 import ExecutionPhotos from './ExecutionPhotos';
+import PendingUploads from './PendingUploads';
 import { isVideo } from '../lib/media';
+import { describeError } from '../lib/errors';
 import {
   dateTime,
   dayKey,
@@ -44,6 +46,7 @@ import {
   type ExecutionPhoto,
   type Draft,
   type Run,
+  type UploadProgress,
 } from '../lib/client';
 const isDone = (a: Activity) => ['completed', 'cancelled'].includes(a.status);
 const dueDefault = () => {
@@ -87,10 +90,16 @@ export default function ActivityDetail({
     executionResponses(a.items, a.responses, lockedItems),
   );
   const [photos, setPhotos] = useState<ExecutionPhoto[]>([]);
+  const [cancelledFiles, setCancelledFiles] = useState<string[]>([]);
+  const [orphanPending, setOrphanPending] = useState(false);
   const [submissionId, setSubmissionId] = useState<string>(() =>
     crypto.randomUUID(),
   );
   const [sending, setSending] = useState(false);
+  const sendLock = useRef(false);
+  const photoLock = useRef(false);
+  const [updatingFiles, setUpdatingFiles] = useState(false);
+  const [uploads, setUploads] = useState<Record<string, UploadProgress>>({});
   const [submitted, setSubmitted] = useState(false);
   const [executionError, setExecutionError] = useState('');
   const [draftReady, setDraftReady] = useState(false);
@@ -123,6 +132,7 @@ export default function ActivityDetail({
     revision: draftRevision,
     responses,
     photos,
+    cancelledFiles,
     submissionId,
     attempt: a.attempt,
     savedAt: new Date().toISOString(),
@@ -146,6 +156,7 @@ export default function ActivityDetail({
         ) {
           setResponses(executionResponses(a.items, d.responses, lockedItems));
           setPhotos(d.photos ?? []);
+          setCancelledFiles(d.cancelledFiles ?? []);
           setSubmissionId(d.submissionId ?? crypto.randomUUID());
           setSync('Rascunho recuperado');
           dirty.current = true;
@@ -250,10 +261,7 @@ export default function ActivityDetail({
       try {
         await fn();
       } catch (error) {
-        failed =
-          error instanceof Error
-            ? error.message
-            : 'Não foi possível concluir a ação.';
+        failed = describeError(error);
         setExecutionError(failed);
         throw error;
       }
@@ -272,7 +280,7 @@ export default function ActivityDetail({
     <Modal
       title={`${unitName(a.unit_id)} · ${a.title}`}
       onClose={() => {
-        if (sending) return;
+        if (sending || updatingFiles) return;
         if (editable && dirty.current)
           void persist(makeDraft())
             .then(onClose)
@@ -289,7 +297,13 @@ export default function ActivityDetail({
         executionError
           ? {
               kind: 'error',
-              title: 'Não foi possível concluir a ação',
+              title: /DRAFT_SAVE|LOCAL_STORAGE/.test(executionError)
+                ? 'Não foi possível salvar o rascunho'
+                : /EVIDENCE|EXECUTION_FILE/.test(executionError)
+                  ? 'Falha no envio da evidência'
+                  : /CHECKLIST_SUBMIT/.test(executionError)
+                    ? 'Checklist ainda não enviado'
+                    : 'Não foi possível concluir a ação',
               message: `${executionError} Suas respostas e arquivos foram mantidos. Retome a vistoria para corrigir o problema e tentar novamente.`,
               actionLabel: 'Retomar vistoria',
               onAction: () => {
@@ -371,7 +385,10 @@ export default function ActivityDetail({
                           lockedItems,
                         ),
                       );
-                    if (!dirty.current) setPhotos(draft.photos ?? []);
+                    if (!dirty.current) {
+                      setPhotos(draft.photos ?? []);
+                      setCancelledFiles(draft.cancelledFiles ?? []);
+                    }
                     setDraftRevision(a.revision);
                     setSubmissionId(draft.submissionId ?? crypto.randomUUID());
                     dirty.current = true;
@@ -452,7 +469,7 @@ export default function ActivityDetail({
                             <input
                               type="checkbox"
                               checked={r.confirmed}
-                              disabled={!editable || lockedItem}
+                              disabled={!editable || sending || lockedItem}
                               onChange={(e) =>
                                 update(i.id, { confirmed: e.target.checked })
                               }
@@ -473,7 +490,7 @@ export default function ActivityDetail({
                               <label className="counter">
                                 <button
                                   aria-label={`Diminuir quantidade de ${i.title}`}
-                                  disabled={!editable || lockedItem}
+                                  disabled={!editable || sending || lockedItem}
                                   onClick={() =>
                                     update(i.id, {
                                       found: Math.max(0, (r.found ?? 0) - 1),
@@ -486,7 +503,7 @@ export default function ActivityDetail({
                                   aria-label={`Quantidade encontrada de ${i.title}`}
                                   type="number"
                                   min={0}
-                                  disabled={!editable || lockedItem}
+                                  disabled={!editable || sending || lockedItem}
                                   value={r.found ?? ''}
                                   onChange={(e) =>
                                     update(i.id, {
@@ -496,7 +513,7 @@ export default function ActivityDetail({
                                 />
                                 <button
                                   aria-label={`Aumentar quantidade de ${i.title}`}
-                                  disabled={!editable || lockedItem}
+                                  disabled={!editable || sending || lockedItem}
                                   onClick={() =>
                                     update(i.id, {
                                       found: Math.min(9999, (r.found ?? 0) + 1),
@@ -513,47 +530,13 @@ export default function ActivityDetail({
                                   </span>
                                 )}
                             </div>
-                            <label className="field">
-                              <span>Condição</span>
-                              <select
-                                aria-label={`Condição de ${i.title}`}
-                                disabled={!editable || lockedItem}
-                                value={r.condition ?? 'ok'}
-                                onChange={(e) =>
-                                  update(i.id, {
-                                    condition: e.target.value,
-                                  })
-                                }
-                              >
-                                {[
-                                  { value: 'ok', label: 'Conforme' },
-                                  { value: 'damaged', label: 'Danificado' },
-                                  {
-                                    value: 'divergent',
-                                    label: 'Quantidade divergente',
-                                  },
-                                ].map((c) => (
-                                  <option
-                                    key={c.value}
-                                    value={c.value}
-                                    disabled={
-                                      c.value === 'divergent'
-                                        ? r.found === i.expected
-                                        : r.found !== i.expected
-                                    }
-                                  >
-                                    {c.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
                           </>
                         )}
                         {i.mode === 'technical' && (
                           <label className="field">
                             <span>Conferência técnica</span>
                             <select
-                              disabled={!editable || lockedItem}
+                              disabled={!editable || sending || lockedItem}
                               value={r.answer ?? 'ok'}
                               onChange={(e) =>
                                 update(i.id, {
@@ -583,10 +566,54 @@ export default function ActivityDetail({
                           }
                         >
                           <summary>
-                            {problem
-                              ? 'Descrever problema'
-                              : 'Observações e detalhes'}
+                            {i.mode === 'count'
+                              ? r.condition === 'damaged'
+                                ? 'Danificado · explicar'
+                                : r.condition === 'divergent'
+                                  ? 'Quantidade divergente · explicar'
+                                  : 'Conforme · detalhes'
+                              : problem
+                                ? 'Descrever problema'
+                                : 'Observações e detalhes'}
                           </summary>
+                          {i.mode === 'count' && (
+                            <>
+                              <label className="field">
+                                <span>Condição</span>
+                                <select
+                                  aria-label={`Condição de ${i.title}`}
+                                  disabled={!editable || sending || lockedItem}
+                                  value={r.condition ?? 'ok'}
+                                  onChange={(e) =>
+                                    update(i.id, {
+                                      condition: e.target.value,
+                                    })
+                                  }
+                                >
+                                  {[
+                                    { value: 'ok', label: 'Conforme' },
+                                    { value: 'damaged', label: 'Danificado' },
+                                    {
+                                      value: 'divergent',
+                                      label: 'Quantidade divergente',
+                                    },
+                                  ].map((c) => (
+                                    <option
+                                      key={c.value}
+                                      value={c.value}
+                                      disabled={
+                                        c.value === 'divergent'
+                                          ? r.found === i.expected
+                                          : r.found !== i.expected
+                                      }
+                                    >
+                                      {c.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </>
+                          )}
                           {i.instructions && (
                             <p className="muted">{i.instructions}</p>
                           )}
@@ -600,7 +627,7 @@ export default function ActivityDetail({
                                 : '(opcional)'}
                             </span>
                             <textarea
-                              disabled={!editable || lockedItem}
+                              disabled={!editable || sending || lockedItem}
                               value={r.note ?? ''}
                               onChange={(e) =>
                                 update(i.id, { note: e.target.value })
@@ -628,7 +655,9 @@ export default function ActivityDetail({
                                       <input
                                         type="number"
                                         min={0}
-                                        disabled={!editable || lockedItem}
+                                        disabled={
+                                          !editable || sending || lockedItem
+                                        }
                                         value={
                                           (r[
                                             f.key as keyof Response
@@ -759,15 +788,36 @@ export default function ActivityDetail({
               )}
             </details>
             <ExecutionPhotos
+              uploads={uploads}
               photos={photos}
               evidence={evidence}
               attempt={a.attempt}
-              editable={editable && draftReady && !busy && !sending}
-              onChange={(next) => {
-                setValidation(null);
-                setPhotos(next);
-                dirty.current = true;
-                setSync('Rascunho com alterações');
+              editable={
+                editable && draftReady && !busy && !sending && !updatingFiles
+              }
+              onChange={async (next) => {
+                if (photoLock.current) return;
+                photoLock.current = true;
+                setUpdatingFiles(true);
+                try {
+                  setCancelledFiles((previous) => [
+                    ...new Set([
+                      ...previous,
+                      ...photos
+                        .filter((p) => !next.some((n) => n.id === p.id))
+                        .map((p) => p.id),
+                    ]),
+                  ]);
+                  setValidation(null);
+                  setPhotos(next);
+                  dirty.current = true;
+                  setSync('Rascunho com alterações');
+                } catch (e) {
+                  setExecutionError(describeError(e));
+                } finally {
+                  photoLock.current = false;
+                  setUpdatingFiles(false);
+                }
               }}
               onError={setExecutionError}
               onView={async (e) => {
@@ -791,6 +841,15 @@ export default function ActivityDetail({
                   );
                 }
               }}
+            />
+            <PendingUploads
+              kind="activity"
+              resource={a.id}
+              localIds={[...photos.map((p) => p.id), ...cancelledFiles]}
+              active={editable && draftReady}
+              busy={sending || updatingFiles}
+              onError={setExecutionError}
+              onPending={setOrphanPending}
             />
           </div>
           {waitingToStart && (
@@ -969,17 +1028,54 @@ export default function ActivityDetail({
             </div>
           ))}
         </details>
-        {order && manager && (
-          <OrderManagement
-            order={order}
-            run={runAction}
-            onChanged={(action) => {
-              if (action === 'delete') onClose();
-            }}
-            onError={setExecutionError}
-          />
-        )}
+        {order &&
+          manager &&
+          !sending &&
+          !updatingFiles &&
+          !photos.some((p) => !p.uploaded) && (
+            <OrderManagement
+              order={order}
+              run={runAction}
+              onChanged={(action) => {
+                if (action === 'delete') onClose();
+              }}
+              onError={setExecutionError}
+            />
+          )}
       </div>
+      {editable && (
+        <div className="execution-next">
+          <button
+            className="button secondary"
+            disabled={sending}
+            onClick={() => {
+              const pending = a.items.filter(
+                (i) =>
+                  i.required &&
+                  !responses[i.id]?.confirmed &&
+                  !lockedItems.includes(i.id),
+              );
+              const first =
+                pending.find(
+                  (i) =>
+                    (itemNodes.current.get(i.id)?.getBoundingClientRect().top ??
+                      0) > 150,
+                ) ?? pending[0];
+              if (first) {
+                itemNodes.current
+                  .get(first.id)
+                  ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                itemNodes.current.get(first.id)?.focus({ preventScroll: true });
+              } else
+                document
+                  .querySelector('.execution-photos')
+                  ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }}
+          >
+            Próxima pendência
+          </button>
+        </div>
+      )}
       <footer className="execution-footer" hidden={waitingToStart}>
         {validation && !validation.itemId && (
           <p className="item-validation" role="alert">
@@ -992,7 +1088,7 @@ export default function ActivityDetail({
             <div className="button-row">
               <button
                 className="button secondary"
-                disabled={busy || sending || !draftReady}
+                disabled={busy || sending || updatingFiles || !draftReady}
                 onClick={() =>
                   void runAction(async () => {
                     await persist(makeDraft());
@@ -1005,8 +1101,15 @@ export default function ActivityDetail({
               </button>
               <button
                 className="button primary"
-                disabled={busy || sending || !draftReady}
+                disabled={
+                  busy ||
+                  sending ||
+                  updatingFiles ||
+                  orphanPending ||
+                  !draftReady
+                }
                 onClick={async () => {
+                  if (sendLock.current) return;
                   const issue = executionIssue(
                     a.items,
                     responses,
@@ -1028,11 +1131,26 @@ export default function ActivityDetail({
                     }
                     return;
                   }
+                  sendLock.current = true;
                   setSending(true);
                   setExecutionError('');
                   const ok = await runAction(async () => {
                     try {
                       await sendExecution(makeDraft(), {
+                        prepare: async (d) => {
+                          for (const file of d.cancelledFiles ?? [])
+                            await rpc('cancel_evidence_upload', {
+                              kind: 'activity',
+                              resource: a.id,
+                              file,
+                            });
+                          await rpc('expect_evidence_uploads', {
+                            kind: 'activity',
+                            resource: a.id,
+                            files: (d.photos ?? []).map((p) => p.id),
+                          });
+                          setCancelledFiles([]);
+                        },
                         persist: async (d) => {
                           await persist(d);
                           setPhotos(d.photos ?? []);
@@ -1044,21 +1162,23 @@ export default function ActivityDetail({
                             photo.file,
                             '__activity__',
                             photo.id,
+                            (progress) =>
+                              setUploads((previous) => ({
+                                ...previous,
+                                [photo.id]: progress,
+                              })),
                           ),
                         submit: (d) =>
-                          rpc('submit_checklist', {
+                          rpc('submit_checklist_with_evidence', {
                             activity: a.id,
                             expected_revision: d.revision,
                             submission: d.submissionId,
                             responses: d.responses,
+                            files: (d.photos ?? []).map((p) => p.id),
                           }),
                       });
                     } catch (error) {
-                      setExecutionError(
-                        error instanceof Error
-                          ? error.message
-                          : 'Não foi possível enviar a vistoria.',
-                      );
+                      setExecutionError(describeError(error));
                       throw error;
                     }
                   }, 'Vistoria enviada para aprovação com sucesso.');
@@ -1078,6 +1198,7 @@ export default function ActivityDetail({
                     );
                   }
                   setSending(false);
+                  sendLock.current = false;
                 }}
               >
                 <Send size={17} />

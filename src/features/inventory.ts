@@ -1,6 +1,31 @@
-import type { Data } from '../domain';
+import type { Data, Item } from '../domain';
 
 export type InventoryItem = Data['inventory_items'][number];
+export function inventoryDifferences(data: Data, unit: string, items: Item[]) {
+  return items
+    .filter((item) => item.mode === 'count')
+    .flatMap((item) => {
+      const current = data.inventory_items.find(
+        (i) =>
+          i.unit_id === unit &&
+          i.active !== false &&
+          (i.id === (item.inventory_item_id ?? item.id) ||
+            (!item.inventory_item_id &&
+              i.name.trim().toLowerCase() === item.title.trim().toLowerCase() &&
+              i.room.trim().toLowerCase() === item.room.trim().toLowerCase())),
+      );
+      if (
+        !current ||
+        (current.name === item.title &&
+          current.room === item.room &&
+          (item.quantity_per_guest !== undefined ||
+            current.expected === item.expected) &&
+          item.inventory_item_id === current.id)
+      )
+        return [];
+      return [{ item, current }];
+    });
+}
 export function inventoryManagementScope(data: Data, user: string) {
   const active = data.profiles.some((p) => p.id === user && p.active);
   // As propriedades recebidas já respeitam o escopo de leitura da RLS.

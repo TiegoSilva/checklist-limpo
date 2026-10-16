@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Camera, Image, CheckCheck, Play, Send, X } from 'lucide-react';
 import { Badge, Form, Modal, type ModalFeedback } from './components';
 import { dateTime, dayKey, type Data, type Service } from './domain';
-import { isVideo, MEDIA_ACCEPT } from './lib/media';
+import { isVideo, MEDIA_ACCEPT, fileSize } from './lib/media';
 import { rpc, signedImage, uploadPhoto } from './lib/client';
+import { supabase } from './lib/client';
+import { readApiResponse, describeError } from './lib/errors';
 import OrderStayContext, { serviceWindow } from './features/OrderStayContext';
 import OrderManagement from './features/OrderManagement';
+import { PhotoDraft } from './features/ExecutionPhotos';
+import PendingUploads from './features/PendingUploads';
+import type { ExecutionPhoto, UploadProgress } from './lib/client';
 type Run = (fn: () => Promise<unknown>, success?: string) => Promise<boolean>;
 export function MemberEditor({
   data,
@@ -18,35 +23,75 @@ export function MemberEditor({
 }) {
   const [roles, setRoles] = useState<string[]>(['cleaner']);
   const [access, setAccess] = useState<string[]>([]);
+  const [inviteId] = useState(() => crypto.randomUUID());
+  const [sendLink, setSendLink] = useState(false);
+  const [error, setError] = useState('');
+  const [organization, setOrganization] = useState(
+    data.organizations[0]?.id ?? '',
+  );
   return (
     <Modal title="Equipe e permissões" onClose={onClose} wide>
       <p className="modal-description">
-        Primeiro crie ou convide a conta individual no Supabase Auth. Depois
-        atribua as funções e propriedades abaixo. Informar uma conta existente
-        atualiza seus acessos.
+        Informe a conta, escolha a organização, as funções e as propriedades.
+        Novas contas recebem um convite; contas existentes têm seus acessos
+        atualizados.
       </p>
+      {error && (
+        <p role="alert" className="alert error">
+          {error}
+        </p>
+      )}
+      <label className="field">
+        Organização
+        <select
+          value={organization}
+          onChange={(e) => {
+            setOrganization(e.target.value);
+            setAccess([]);
+          }}
+        >
+          {data.organizations.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+      </label>
       <Form
         fields={[
-          {
-            name: 'org_id',
-            label: 'Organização',
-            options: data.organizations.map((o) => ({
-              value: o.id,
-              label: o.name,
-            })),
-            value: data.organizations[0]?.id,
-          },
           { name: 'email', label: 'E-mail da conta', type: 'email' },
           { name: 'name', label: 'Nome completo' },
         ]}
         onSubmit={async (v) => {
           if (
-            await run(() =>
-              rpc('configure', {
-                action: 'member',
-                payload: { ...v, roles, properties: access },
-              }),
-            )
+            await run(async () => {
+              setError('');
+              try {
+                const session = (await supabase?.auth.getSession())?.data
+                  .session;
+                if (!session) throw new Error('Entre novamente.');
+                await readApiResponse(
+                  await fetch('/api/team-invite', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${session.access_token}`,
+                    },
+                    body: JSON.stringify({
+                      ...v,
+                      org_id: organization,
+                      request_id: inviteId,
+                      roles,
+                      properties: access,
+                      send_link: sendLink,
+                    }),
+                  }),
+                );
+              } catch (e) {
+                setError(describeError(e));
+                throw e;
+              }
+            }, 'Convite ou atualização de acessos confirmado.')
           )
             onClose();
         }}
@@ -77,22 +122,24 @@ export function MemberEditor({
         </fieldset>
         <fieldset className="template-item">
           <legend>Propriedades autorizadas</legend>
-          {data.properties.map((p) => (
-            <label className="check-label" key={p.id}>
-              <input
-                type="checkbox"
-                checked={access.includes(p.id)}
-                onChange={(e) =>
-                  setAccess((prev) =>
-                    e.target.checked
-                      ? [...prev, p.id]
-                      : prev.filter((x) => x !== p.id),
-                  )
-                }
-              />
-              {p.name}
-            </label>
-          ))}
+          {data.properties
+            .filter((p) => p.org_id === organization)
+            .map((p) => (
+              <label className="check-label" key={p.id}>
+                <input
+                  type="checkbox"
+                  checked={access.includes(p.id)}
+                  onChange={(e) =>
+                    setAccess((prev) =>
+                      e.target.checked
+                        ? [...prev, p.id]
+                        : prev.filter((x) => x !== p.id),
+                    )
+                  }
+                />
+                {p.name}
+              </label>
+            ))}
           {!data.properties.length && (
             <p className="muted">Cadastre os empreendimentos primeiro.</p>
           )}
@@ -101,6 +148,14 @@ export function MemberEditor({
             demais funções precisam de autorização explícita.
           </small>
         </fieldset>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={sendLink}
+            onChange={(e) => setSendLink(e.target.checked)}
+          />
+          Enviar novo link de acesso também para conta existente
+        </label>
       </Form>
       <details className="room-section">
         <summary>Ativar ou desativar colaborador</summary>
@@ -165,7 +220,58 @@ export function ServiceDetail({
   const [note, setNote] = useState(s.completion_note ?? '');
   const [reason, setReason] = useState('');
   const [reject, setReject] = useState(false);
+  const [pendingFile, setPendingFile] = useState<ExecutionPhoto>();
+  const [orphanPending, setOrphanPending] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [transfer, setTransfer] = useState<UploadProgress>();
+  const transferLock = useRef(false);
+  const sendFile = async (file: ExecutionPhoto) => {
+    if (transferLock.current) return;
+    transferLock.current = true;
+    setBusy(true);
+    setPendingFile(file);
+    let message = '';
+    const ok = await run(async () => {
+      try {
+        await uploadPhoto(
+          'service',
+          s.id,
+          file.file,
+          undefined,
+          file.id,
+          setTransfer,
+        );
+      } catch (e) {
+        message = describeError(e);
+        throw e;
+      }
+    }, 'Evidência recebida e verificada pelo servidor.');
+    if (ok) setPendingFile({ ...file, uploaded: true });
+    else
+      setFeedback({
+        kind: 'error',
+        title: 'Arquivo ainda não confirmado',
+        message:
+          message ||
+          `Não foi possível confirmar “${file.file.name}”. Retome a tarefa e tente enviar este arquivo novamente.`,
+        actionLabel: 'Retomar tarefa',
+        onAction: () => setFeedback(null),
+      });
+    transferLock.current = false;
+    setBusy(false);
+  };
   const act = async (action: string) => {
+    if (busy || transferLock.current) return;
+    if (action === 'submit' && pendingFile && !pendingFile.uploaded) {
+      setFeedback({
+        kind: 'error',
+        title: 'Há um arquivo pendente',
+        message: `Conclua o envio de “${pendingFile.file.name}” antes de enviar a tarefa para aprovação.`,
+        actionLabel: 'Retomar envio',
+        onAction: () => setFeedback(null),
+      });
+      return;
+    }
     if (action === 'submit' && note.trim().length < 5) {
       setFeedback({
         kind: 'error',
@@ -197,10 +303,7 @@ export function ServiceDetail({
             payload: { id: s.id, revision: s.revision, note, reason },
           });
         } catch (e) {
-          message =
-            e instanceof Error
-              ? e.message
-              : 'Não foi possível concluir a ação.';
+          message = describeError(e);
           throw e;
         }
       }, '');
@@ -248,6 +351,17 @@ export function ServiceDetail({
     <Modal
       title={s.title}
       onClose={() => {
+        if (pendingFile && !pendingFile.uploaded) {
+          setFeedback({
+            kind: 'error',
+            title: 'Arquivo ainda não confirmado',
+            message:
+              'Aguarde o envio ou retome a tarefa para tentar novamente.',
+            actionLabel: 'Retomar tarefa',
+            onAction: () => setFeedback(null),
+          });
+          return;
+        }
         if (!busy) onClose();
       }}
       wide
@@ -267,6 +381,20 @@ export function ServiceDetail({
         </div>
       )}
       <div className="execution-body">
+        {uploadError && (
+          <p role="alert" className="alert error">
+            {uploadError}
+          </p>
+        )}
+        <PendingUploads
+          kind="service"
+          resource={s.id}
+          localIds={pendingFile ? [pendingFile.id] : []}
+          active={s.assignee === user && s.status === 'in_progress'}
+          busy={busy}
+          onError={setUploadError}
+          onPending={setOrphanPending}
+        />
         <div className="detail-top">
           <Badge status={s.status} />
           <span>
@@ -342,6 +470,7 @@ export function ServiceDetail({
               <Image size={16} />
               {isVideo(p.mime_type) ? 'Vídeo' : 'Foto'} {i + 1} ·{' '}
               {dateTime(p.received_at)}
+              <small>{fileSize(p.file_size)}</small>
             </button>
           ))}
         </div>
@@ -378,17 +507,65 @@ export function ServiceDetail({
             <input
               type="file"
               accept={MEDIA_ACCEPT}
+              disabled={busy || Boolean(pendingFile && !pendingFile.uploaded)}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
-                if (f)
-                  await run(
-                    () => uploadPhoto('service', s.id, f),
-                    'Evidência recebida e verificada pelo servidor.',
-                  );
+                if (f) await sendFile({ id: crypto.randomUUID(), file: f });
                 e.target.value = '';
               }}
             />
           </label>
+        )}
+        {pendingFile && (
+          <article className="execution-photo-draft service-file-preview">
+            <PhotoDraft photo={pendingFile} />
+            <span>
+              {pendingFile.file.name} · {fileSize(pendingFile.file.size)} ·{' '}
+              {pendingFile.uploaded
+                ? 'Recebido'
+                : transfer?.phase === 'receipt'
+                  ? 'Confirmando recebimento…'
+                  : busy
+                    ? `Enviando ${transfer?.percent ?? 0}%`
+                    : 'Envio pendente'}
+            </span>
+            {busy && (
+              <progress
+                max={100}
+                value={transfer?.percent ?? 0}
+                aria-label="Envio do arquivo"
+              />
+            )}
+            {!busy && !pendingFile.uploaded && (
+              <div className="button-row">
+                <button
+                  className="button secondary"
+                  onClick={() => void sendFile(pendingFile)}
+                >
+                  Tentar envio deste arquivo
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={async () => {
+                    setBusy(true);
+                    const ok = await run(
+                      () =>
+                        rpc('cancel_evidence_upload', {
+                          kind: 'service',
+                          resource: s.id,
+                          file: pendingFile.id,
+                        }),
+                      'Seleção removida.',
+                    );
+                    if (ok) setPendingFile(undefined);
+                    setBusy(false);
+                  }}
+                >
+                  Remover seleção
+                </button>
+              </div>
+            )}
+          </article>
         )}
         {executable && s.status === 'in_progress' && (
           <label className="field">
@@ -418,7 +595,9 @@ export function ServiceDetail({
             </button>
           </label>
         )}
-        {manager && <OrderManagement order={s} run={run} onChanged={onClose} />}
+        {manager && !busy && (!pendingFile || pendingFile.uploaded) && (
+          <OrderManagement order={s} run={run} onChanged={onClose} />
+        )}
       </div>
       <footer className="execution-footer">
         {executable &&
@@ -426,7 +605,11 @@ export function ServiceDetail({
           (s.status === 'in_progress' ? (
             <button
               className="button primary full"
-              disabled={busy}
+              disabled={
+                busy ||
+                orphanPending ||
+                Boolean(pendingFile && !pendingFile.uploaded)
+              }
               onClick={() => void act('submit')}
             >
               <Send size={18} />

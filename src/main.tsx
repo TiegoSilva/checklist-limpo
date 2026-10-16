@@ -6,6 +6,7 @@ import App from './App';
 import { setupInstallPrompt } from './lib/install';
 setupInstallPrompt();
 import './style.css';
+import './features/operations.css';
 const client = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
 });

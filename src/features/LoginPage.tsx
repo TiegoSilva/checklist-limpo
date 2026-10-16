@@ -19,9 +19,12 @@ export default function LoginPage({
 }) {
   const [visible, setVisible] = useState(false);
   const [error, setError] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [notice, setNotice] = useState('');
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof credentials>>({
     resolver: zodResolver(credentials),
@@ -155,6 +158,47 @@ export default function LoginPage({
                 {isSubmitting ? 'Entrando…' : 'Entrar'}
               </button>
             </form>
+            <button
+              type="button"
+              className="button secondary full"
+              disabled={linkBusy || isSubmitting || !configured}
+              onClick={async () => {
+                const email = z.email().safeParse(getValues('email').trim());
+                if (!email.success) {
+                  setError('Preencha seu e-mail acima para receber o link.');
+                  return;
+                }
+                setLinkBusy(true);
+                setError('');
+                setNotice('');
+                try {
+                  const result = await supabase!.auth.signInWithOtp({
+                    email: email.data,
+                    options: {
+                      shouldCreateUser: false,
+                      emailRedirectTo: window.location.origin,
+                    },
+                  });
+                  if (result.error) throw result.error;
+                  setNotice(
+                    'Se a conta estiver autorizada, o link chegará ao seu e-mail. Confira também o spam.',
+                  );
+                } catch {
+                  setError(
+                    'Não foi possível solicitar o link. Tente novamente mais tarde ou fale com o administrador.',
+                  );
+                } finally {
+                  setLinkBusy(false);
+                }
+              }}
+            >
+              {linkBusy ? 'Solicitando…' : 'Entrar com link por e-mail'}
+            </button>
+            {notice && (
+              <p role="status" className="login-help">
+                {notice}
+              </p>
+            )}
             <p className="login-help">
               Precisa de acesso? Fale com o administrador.
             </p>

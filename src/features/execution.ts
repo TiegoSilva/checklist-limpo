@@ -1,5 +1,6 @@
 import type { Item, Response } from '../domain';
 import type { Draft, ExecutionPhoto } from '../lib/client';
+import { OperationError, describeError } from '../lib/errors';
 
 export function itemResponse(item: Item, response?: Response): Response {
   const next: Response = { confirmed: false, ...response };
@@ -51,23 +52,62 @@ export async function sendExecution(
     persist: (draft: Draft) => Promise<void>;
     upload: (photo: ExecutionPhoto) => Promise<void>;
     submit: (draft: Draft) => Promise<unknown>;
+    prepare?: (draft: Draft) => Promise<void>;
   },
 ) {
   const state = {
     ...draft,
     photos: (draft.photos ?? []).map((p) => ({ ...p })),
   };
-  await dependencies.persist(state);
+  try {
+    await dependencies.persist(state);
+  } catch (error) {
+    throw new OperationError(
+      'DRAFT_SAVE',
+      `Não foi possível preservar o rascunho antes do envio. ${describeError(error)}`,
+    );
+  }
+  if (dependencies.prepare) {
+    try {
+      await dependencies.prepare(state);
+      state.cancelledFiles = [];
+      await dependencies.persist(state);
+    } catch (error) {
+      throw new OperationError(
+        'EVIDENCE_QUEUE',
+        `Não foi possível registrar a lista de arquivos esperados. ${describeError(error)}`,
+      );
+    }
+  }
   for (const photo of state.photos) {
     if (photo.uploaded) continue;
-    await dependencies.upload(photo);
+    try {
+      await dependencies.upload(photo);
+    } catch (error) {
+      throw new OperationError(
+        'EXECUTION_FILE',
+        `Evidência ${state.photos.indexOf(photo) + 1} de ${state.photos.length}, arquivo “${photo.file.name}”: ${describeError(error)}`,
+      );
+    }
     photo.uploaded = true;
     await dependencies.persist({
       ...state,
       photos: state.photos.map((p) => ({ ...p })),
     });
   }
-  await dependencies.submit(state);
+  if (state.photos.some((photo) => !photo.uploaded))
+    throw new OperationError(
+      'PENDING_UPLOADS',
+      'Ainda há arquivos sem confirmação. Aguarde o envio antes de concluir.',
+    );
+  try {
+    await dependencies.submit(state);
+  } catch (error) {
+    throw new OperationError(
+      'CHECKLIST_SUBMIT',
+      `Os arquivos já foram recebidos, mas o checklist não foi enviado para aprovação. ${describeError(error)}`,
+    );
+  }
 }
 
 export function executionIssue(
@@ -90,7 +130,7 @@ export function executionIssue(
     )
       return {
         itemId: item.id,
-        message: 'Informe uma quantidade inteira entre 0 e 9999.',
+        message: `${item.room} · ${item.title}: informe uma quantidade inteira entre 0 e 9999.`,
       };
     if (
       (response.condition === 'divergent' ||
@@ -100,12 +140,13 @@ export function executionIssue(
     )
       return {
         itemId: item.id,
-        message: 'Descreva o problema em pelo menos 5 caracteres.',
+        message: `${item.room} · ${item.title}: descreva o problema em pelo menos 5 caracteres.`,
       };
   }
   if (items.some((i) => i.evidence_required) && !hasPhoto)
     return {
-      message: 'Adicione pelo menos uma foto ou vídeo da vistoria antes de enviar.',
+      message:
+        'Adicione pelo menos uma foto ou vídeo da vistoria antes de enviar.',
     };
   return null;
 }

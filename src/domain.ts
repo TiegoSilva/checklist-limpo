@@ -1,5 +1,6 @@
 export type Role = 'admin' | 'manager' | 'inspector' | 'cleaner';
 export type Item = {
+  inventory_item_id?: string;
   id: string;
   room: string;
   title: string;
@@ -50,12 +51,14 @@ export type Activity = {
   approved_by?: string;
 };
 export type Property = {
+  revision?: number;
   id: string;
   org_id: string;
   name: string;
   address: string;
 };
 export type Unit = {
+  revision?: number;
   id: string;
   property_id: string;
   name: string;
@@ -72,6 +75,10 @@ export type Profile = {
   font_scale: number;
 };
 export type Service = {
+  created_at?: string;
+  started_at?: string;
+  submitted_at?: string;
+  approved_at?: string;
   deleted_at?: string | null;
   deleted_batch_id?: string | null;
   scheduled_start_at?: string;

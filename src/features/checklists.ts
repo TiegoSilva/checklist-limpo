@@ -21,4 +21,7 @@ export const templateName = (template: Template) =>
   template.name?.trim() || checklistLabel(template.kind);
 
 export const duplicateItems = (items: Template['items']) =>
-  items.map((item) => ({ ...item, id: crypto.randomUUID() }));
+  items.map(({ inventory_item_id: _source, ...item }) => ({
+    ...item,
+    id: crypto.randomUUID(),
+  }));

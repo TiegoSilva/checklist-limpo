@@ -1,4 +1,5 @@
 import { dayKey, type Activity, type Data, type Service } from '../domain';
+import { matchesSearch } from '../lib/search';
 export function pendingApprovals(activities: Activity[], orders: Service[]) {
   return {
     activities: activities.filter(
@@ -24,9 +25,10 @@ export function stayOrdersToday(
         ['checkin', 'checkout'].includes(s.order_type ?? '') &&
         dayKey(new Date(s.scheduled_start_at ?? s.due_at)) === today &&
         (!property || unit?.property_id === property) &&
-        `${s.title} ${unit?.name ?? ''}`
-          .toLowerCase()
-          .includes(search.toLowerCase())
+        matchesSearch(
+          `${s.title} ${unit?.name ?? ''} ${data.properties.find((p) => p.id === unit?.property_id)?.name ?? ''} ${data.profiles.find((p) => p.id === s.assignee)?.name ?? ''}`,
+          search,
+        )
       );
     })
     .sort((a, b) =>

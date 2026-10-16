@@ -79,21 +79,6 @@ export default function OrderStayContext({
                     },
                   ]
                 : []),
-              {
-                name: 'checkout_start_time',
-                label: 'Início do checkout',
-                type: 'time',
-                value: (stay.checkout_start_time ?? stay.checkout_time).slice(
-                  0,
-                  5,
-                ),
-              },
-              {
-                name: 'checkout_time',
-                label: 'Fim do checkout',
-                type: 'time',
-                value: stay.checkout_time.slice(0, 5),
-              },
               { name: 'reason', label: 'Motivo da alteração' },
             ]}
             onSubmit={async (values) => {

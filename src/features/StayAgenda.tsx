@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Badge, Form, Modal } from '../components';
 import { dayKey, type AgendaEntry, type Data } from '../domain';
 import { rpc } from '../lib/client';
+import { matchesSearch } from '../lib/search';
 
 type Run = (fn: () => Promise<unknown>, success?: string) => Promise<boolean>;
 const today = () => dayKey(new Date());
@@ -13,11 +14,13 @@ export default function StayAgenda({
   manager,
   property,
   run,
+  search = '',
 }: {
   data: Data;
   manager: boolean;
   property: string;
   run: Run;
+  search?: string;
 }) {
   const [editing, setEditing] = useState<AgendaEntry | null>(null);
   const [error, setError] = useState('');
@@ -29,7 +32,11 @@ export default function StayAgenda({
           data.units.some(
             (u) => u.id === r.unit_id && u.property_id === property,
           )) &&
-        (all || r.checkout >= today()),
+        (all || r.checkout >= today()) &&
+        matchesSearch(
+          `${data.units.find((u) => u.id === r.unit_id)?.name} ${data.properties.find((p) => p.id === data.units.find((u) => u.id === r.unit_id)?.property_id)?.name} ${r.checkin} ${r.checkout} ${data.profiles.find((p) => p.id === r.cleaner)?.name} ${data.profiles.find((p) => p.id === r.inspector)?.name}`,
+          search,
+        ),
     )
     .sort(
       (a, b) =>
@@ -155,20 +162,6 @@ export default function StayAgenda({
                     },
                   ]
                 : []),
-              {
-                name: 'checkout_start_time',
-                label: 'Início do checkout',
-                type: 'time',
-                value: (
-                  editing.checkout_start_time ?? editing.checkout_time
-                ).slice(0, 5),
-              },
-              {
-                name: 'checkout_time',
-                label: 'Fim do checkout',
-                type: 'time',
-                value: editing.checkout_time.slice(0, 5),
-              },
               { name: 'reason', label: 'Motivo da alteração' },
             ]}
             onSubmit={async (payload) => {
@@ -180,6 +173,8 @@ export default function StayAgenda({
                     expected_revision: editing.revision,
                     payload: {
                       ...payload,
+                      checkout_start_time: '12:00',
+                      checkout_time: '12:30',
                       checkout: payload.checkout || editing.checkout,
                     },
                   });

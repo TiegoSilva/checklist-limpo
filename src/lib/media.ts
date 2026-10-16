@@ -1,6 +1,12 @@
 export const MAX_EVIDENCE_FILES = 8;
-export const PHOTO_LIMIT = 10 * 1024 * 1024;
-export const VIDEO_LIMIT = 50 * 1024 * 1024;
+export const PHOTO_LIMIT = 25 * 1024 * 1024;
+export const VIDEO_LIMIT = 200 * 1024 * 1024;
+export function fileSize(bytes?: number | null) {
+  if (bytes == null) return 'Tamanho não informado';
+  return bytes < 1024 * 1024
+    ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+    : `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024)} MB`;
+}
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
 export const MEDIA_ACCEPT = [...PHOTO_TYPES, ...VIDEO_TYPES].join(',');
@@ -13,8 +19,8 @@ export function mediaError(file: { type: string; size: number }) {
     file.size > (isVideo(file.type) ? VIDEO_LIMIT : PHOTO_LIMIT)
   )
     return isVideo(file.type)
-      ? 'O vídeo deve ter até 50 MB. Grave um vídeo mais curto e tente novamente.'
-      : 'Cada foto deve ter até 10 MB.';
+      ? 'O vídeo deve ter até 200 MB. Escolha um arquivo menor e tente novamente.'
+      : 'Cada foto deve ter até 25 MB.';
   return null;
 }
 // O servidor confere a assinatura do contêiner; extensão e MIME do cliente não bastam.
