@@ -33,6 +33,7 @@ import {
   AlertTriangle,
   LoaderCircle,
   SlidersHorizontal,
+  Smartphone,
   Building2,
 } from 'lucide-react';
 import { configured, supabase, loadData, rpc, clearDrafts } from './lib/client';
@@ -46,7 +47,8 @@ import {
   orderStatus,
 } from './domain';
 import { Empty, Form, Modal, Badge } from './components';
-import { enablePush, disablePush } from './lib/push';
+import DeviceSettings from './features/DeviceSettings';
+import { disablePush } from './lib/push';
 import { MemberEditor, ServiceDetail } from './management';
 import TemplateEditor from './features/TemplateEditor';
 import ActivityDetail from './features/ActivityDetail';
@@ -69,6 +71,7 @@ const navigation = [
   { path: '/aprovacoes', label: 'Aprovações', icon: ClipboardCheck },
   { path: '/propriedades', label: 'Propriedades', icon: House },
   { path: '/servicos', label: 'Ordens de serviço', icon: Wrench },
+  { path: '/dispositivo', label: 'App no aparelho', icon: Smartphone },
 ];
 const management = [
   { path: '/inventario', label: 'Inventário', icon: ListChecks },
@@ -145,6 +148,21 @@ function Portal({ session }: { session: Session }) {
   const location = useLocation();
   const navigate = useNavigate();
   const path = location.pathname;
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const openNotices = (event: MessageEvent) => {
+      if (event.data?.type !== 'OPEN_NOTIFICATIONS') return;
+      // Um aviso nunca descarta o checklist ou o formulário que está aberto.
+      if (selected || service || modal)
+        setMessage(
+          'Você tem novos avisos. Salve ou conclua o que está fazendo e abra Notificações.',
+        );
+      else navigate('/notificacoes');
+    };
+    navigator.serviceWorker.addEventListener('message', openNotices);
+    return () =>
+      navigator.serviceWorker.removeEventListener('message', openNotices);
+  }, [selected, service, modal, navigate]);
   const qc = useQueryClient();
   const query = useQuery({
     queryKey: ['operation', session?.user.id],
@@ -1479,42 +1497,12 @@ function Portal({ session }: { session: Session }) {
               </button>
             </section>
           )}
+          {path === '/dispositivo' && <DeviceSettings />}
           {path === '/perfil' && (
-            <section className="panel push-settings">
-              <div className="section-heading">
-                <div>
-                  <h2>Notificações neste dispositivo</h2>
-                  <p>
-                    Receba avisos quando o aplicativo estiver fechado, conforme
-                    o suporte do navegador.
-                  </p>
-                </div>
-                <Bell size={20} />
-              </div>
-              <div className="button-row">
-                <button
-                  className="button primary"
-                  onClick={() => {
-                    if (needSession())
-                      void run(
-                        enablePush,
-                        'Notificações ativadas neste dispositivo.',
-                      );
-                  }}
-                >
-                  Ativar notificações push
-                </button>
-                <button
-                  className="button secondary"
-                  onClick={() => {
-                    if (needSession())
-                      void run(disablePush, 'Notificações push desativadas.');
-                  }}
-                >
-                  Desativar push
-                </button>
-              </div>
-            </section>
+            <NavLink to="/dispositivo" className="button secondary">
+              <Smartphone size={18} />
+              Instalação e notificações
+            </NavLink>
           )}
           {path === '/propriedades' && manager && (
             <section className="panel quick-reservation">
@@ -1578,6 +1566,7 @@ function Portal({ session }: { session: Session }) {
             className="button danger full"
             onClick={() =>
               void run(async () => {
+                await disablePush().catch(() => {});
                 await clearDrafts();
                 await supabase?.auth.signOut();
                 qc.clear();

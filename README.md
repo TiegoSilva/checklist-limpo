@@ -72,9 +72,9 @@ Gere as chaves VAPID com a biblioteca instalada, em seu terminal privado:
 node --input-type=module -e "import webpush from 'web-push'; console.log(webpush.generateVAPIDKeys())"
 ```
 
-Cadastre as chaves nas variáveis apropriadas e habilite push em **Seu perfil**. A permissão depende do navegador e da plataforma. No iOS, a instalação na tela inicial pode ser necessária.
+Cadastre as chaves nas variáveis apropriadas e abra **App no aparelho** para instalar, ativar notificações e enviar um teste. A migração 013 também permite despertar a fila depois das ações da aplicação. Consulte [instalação, vídeos e notificações](docs/APP_E_NOTIFICACOES.md).
 
-O endpoint `GET /api/notifications` exige `Authorization: Bearer <CRON_SECRET>`. Configure um agendador para chamá-lo. `vercel.cron.example.json` contém uma configuração de cinco em cinco minutos para incorporar a `vercel.json` **somente se seu plano suportar essa frequência**. O agendamento não é ativado automaticamente e não há processo permanente em memória.
+Como recuperação da entrega e para eventos gerados fora da interface, o endpoint `GET /api/notifications` exige `Authorization: Bearer <CRON_SECRET>`. Configure um agendador para chamá-lo. `vercel.cron.example.json` contém uma configuração de cinco em cinco minutos para incorporar a `vercel.json` **somente se seu plano suportar essa frequência**. O agendamento não é ativado automaticamente e não há processo permanente em memória.
 
 O consumidor usa leases, limite de lote, até oito tentativas, backoff e registros de entrega por dispositivo. Uma interrupção depois de o provedor receber a mensagem pode causar reenvio; o `tag` permite agrupar avisos. Não existe garantia de entrega instantânea do sistema operacional. Push exibe mensagem genérica, sem dados de hóspedes na tela bloqueada. Monitore linhas `state='failed'` e reprocesse após corrigir a causa.
 
@@ -124,3 +124,5 @@ Modelos com nomes próprios e duplicação entre unidades: aplique uma vez `supa
 Execução simplificada, fotos gerais (até 8), envio com retomada e gestão de status/exclusão: aplique uma vez `supabase/migrations/202610150011_execution_and_order_management.sql` após a 010. Publique o frontend e a API de evidências juntos. Detalhes em [Modelos e ordens](docs/MODELOS_E_ORDENS.md).
 
 Para ativar a aprovação da própria execução por gestores, aplique uma vez `supabase/migrations/202610150012_manager_review.sql`, depois da 011. A migração não foi aplicada no projeto remoto nesta entrega.
+
+Fotos e vídeos, bloqueio antes do início e configuração por aparelho: aplique uma vez `supabase/migrations/202610160013_video_and_device_push.sql` após a 012 e publique frontend e APIs juntos. Guia em [App e notificações](docs/APP_E_NOTIFICACOES.md).

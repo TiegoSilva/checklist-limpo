@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Camera, Image, CheckCheck, Play, Send, X } from 'lucide-react';
 import { Badge, Form, Modal, type ModalFeedback } from './components';
 import { dateTime, dayKey, type Data, type Service } from './domain';
+import { isVideo, MEDIA_ACCEPT } from './lib/media';
 import { rpc, signedImage, uploadPhoto } from './lib/client';
 import OrderStayContext, { serviceWindow } from './features/OrderStayContext';
 import OrderManagement from './features/OrderManagement';
@@ -158,7 +159,7 @@ export function ServiceDetail({
   run: Run;
   onClose: () => void;
 }) {
-  const [image, setImage] = useState<string>();
+  const [image, setImage] = useState<{ url: string; video: boolean }>();
   const [feedback, setFeedback] = useState<ModalFeedback | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(s.completion_note ?? '');
@@ -326,13 +327,21 @@ export function ServiceDetail({
               onClick={() =>
                 void run(
                   async () =>
-                    setImage(await signedImage('service-evidence', p.path)),
+                    setImage({
+                      url: await signedImage(
+                        'service-evidence',
+                        p.path,
+                        isVideo(p.mime_type) ? 900 : 120,
+                      ),
+                      video: isVideo(p.mime_type),
+                    }),
                   '',
                 )
               }
             >
               <Image size={16} />
-              Foto {i + 1} · {dateTime(p.received_at)}
+              {isVideo(p.mime_type) ? 'Vídeo' : 'Foto'} {i + 1} ·{' '}
+              {dateTime(p.received_at)}
             </button>
           ))}
         </div>
@@ -345,22 +354,36 @@ export function ServiceDetail({
               <X size={18} />
               Fechar fotografia
             </button>
-            <img src={image} alt="Evidência da ordem de serviço" />
+            {image.video && (
+              <a
+                className="button secondary"
+                href={image.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Abrir vídeo em outra janela
+              </a>
+            )}
+            {image.video ? (
+              <video src={image.url} controls playsInline preload="metadata" />
+            ) : (
+              <img src={image.url} alt="Evidência da ordem de serviço" />
+            )}
           </div>
         )}
         {s.assignee === user && s.status === 'in_progress' && (
           <label className="button secondary file-button">
             <Camera size={17} />
-            Anexar evidência fotográfica
+            Adicionar foto ou vídeo
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept={MEDIA_ACCEPT}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (f)
                   await run(
                     () => uploadPhoto('service', s.id, f),
-                    'Foto recebida e verificada pelo servidor.',
+                    'Evidência recebida e verificada pelo servidor.',
                   );
                 e.target.value = '';
               }}

@@ -126,7 +126,11 @@ beforeAll(async () => {
     )
       .replace('create extension if not exists pgcrypto;', '')
       .replace(/alter publication supabase_realtime[^;]+;/g, '');
-    await db.exec(sql);
+    try {
+      await db.exec(sql);
+    } catch (error) {
+      throw new Error(`Migração ${file}: ${(error as Error).message}`);
+    }
   }
   await asUser(admin);
   org = (await rpc('bootstrap', ['AJA Teste', 'Gestor'])) as string;
@@ -3173,5 +3177,199 @@ describe.sequential('envio único, fotos gerais e gestão das ordens', () => {
         reason: 'Concluir tarefa própria sem evidência',
       }),
     ).rejects.toThrow(/conclusão e a foto/);
+  });
+});
+
+describe.sequential('vídeos e fila de notificações por organização', () => {
+  it('aceita vídeo privado como evidência obrigatória e impede recibo ou metadados declarados pelo cliente', async () => {
+    await asUser(admin);
+    const videoUnit = (await rpc('configure', [
+      'unit',
+      JSON.stringify({
+        property_id: property,
+        name: 'Unidade com vídeo',
+        capacity: 4,
+        base_occupancy: 2,
+      }),
+    ])) as string;
+    const model = (await rpc('save_named_checklist', [
+      JSON.stringify({
+        unit_id: videoUnit,
+        name: 'Conferência com vídeo',
+        items: [{ ...sharedCup, evidence_required: true }],
+      }),
+    ])) as string;
+    const order = (await rpc('create_scheduled_work_order', [
+      JSON.stringify({
+        unit_id: videoUnit,
+        order_type: 'general',
+        execution_mode: 'checklist',
+        template_id: model,
+        assignee: worker,
+        title: 'Vistoria com vídeo',
+        due_at: '2026-10-16T18:00:00Z',
+        occupancy: 2,
+      }),
+    ])) as string;
+    const a = (
+      await db.query<{ activity_id: string }>(
+        'select activity_id from service_orders where id=$1',
+        [order],
+      )
+    ).rows[0].activity_id;
+    await asUser(worker);
+    await action(a, 'start');
+    const file = crypto.randomUUID();
+    await db.query(
+      "insert into storage.objects(bucket_id,name) values('evidence',$1)",
+      [`${a}/${file}`],
+    );
+    const args = [
+      worker,
+      a,
+      'activity',
+      '__activity__',
+      file,
+      'd'.repeat(64),
+      'video/mp4',
+      1024,
+    ];
+    await expect(rpc('receive_media_evidence', args)).rejects.toThrow(
+      /permission denied/,
+    );
+    await db.exec('reset role;set role service_role;');
+    await expect(
+      rpc('receive_media_evidence', [...args.slice(0, 7), 52428801]),
+    ).rejects.toThrow(/tamanho/);
+    await rpc('receive_media_evidence', args);
+    await rpc('receive_media_evidence', args);
+    await asUser(worker);
+    expect(
+      (
+        await db.query<{ mime_type: string; file_size: number }>(
+          'select mime_type,file_size from evidence_files where id=$1',
+          [file],
+        )
+      ).rows[0],
+    ).toMatchObject({ mime_type: 'video/mp4', file_size: 1024 });
+    const rev = (
+      await db.query<{ revision: number }>(
+        'select revision from activities where id=$1',
+        [a],
+      )
+    ).rows[0].revision;
+    await rpc('submit_checklist', [
+      a,
+      rev,
+      crypto.randomUUID(),
+      JSON.stringify({ cup: { confirmed: true, found: 4, condition: 'ok' } }),
+    ]);
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from activities where id=$1',
+          [a],
+        )
+      ).rows[0].status,
+    ).toBe('review');
+    await asUser(admin);
+    await action(a, 'approve');
+    expect(
+      (
+        await db.query<{ status: string }>(
+          'select status from service_orders where id=$1',
+          [order],
+        )
+      ).rows[0].status,
+    ).toBe('approved');
+  });
+  it('mantém buckets privados e o limite de referência separado de vídeos', async () => {
+    await db.exec('reset role');
+    const buckets = (
+      await db.query<{
+        id: string;
+        public: boolean;
+        file_size_limit: number;
+        allowed_mime_types: string[];
+      }>(
+        'select id,public,file_size_limit,allowed_mime_types from storage.buckets',
+      )
+    ).rows;
+    expect(buckets.find((b) => b.id === 'evidence')).toMatchObject({
+      public: false,
+      file_size_limit: 52428800,
+    });
+    expect(
+      buckets.find((b) => b.id === 'evidence')?.allowed_mime_types,
+    ).toContain('video/quicktime');
+    expect(buckets.find((b) => b.id === 'references')?.file_size_limit).toBe(
+      10485760,
+    );
+  });
+  it('desperta somente a fila da organização autorizada, limita repetição e mantém a chamada privada', async () => {
+    await rollbackAfter(async () => {
+      const other = crypto.randomUUID();
+      await db.exec('reset role');
+      await db.query('insert into auth.users values($1,$2)', [
+        other,
+        'push-scope@aja.test',
+      ]);
+      await asUser(other);
+      await rpc('bootstrap', [
+        'Organização isolada push',
+        'Responsável externo',
+      ]);
+      await db.exec('reset role');
+      await db.exec("update event_outbox set state='delivered'");
+      await db.query('select notify($1,null,$2,$3)', [
+        admin,
+        'Aviso próprio novo',
+        'Teste',
+      ]);
+      await db.query('select notify($1,null,$2,$3)', [
+        other,
+        'Aviso de outra organização',
+        'Teste',
+      ]);
+      const own = (
+        await db.query<{ id: string }>(
+          'select id from notifications where title=$1',
+          ['Aviso próprio novo'],
+        )
+      ).rows[0].id;
+      const foreign = (
+        await db.query<{ id: string }>(
+          'select id from notifications where title=$1',
+          ['Aviso de outra organização'],
+        )
+      ).rows[0].id;
+      await asUser(admin);
+      await db.exec('savepoint push_permissions');
+      await expect(rpc('claim_outbox_for_actor', [admin, 20])).rejects.toThrow(
+        /permission denied/,
+      );
+      await db.exec(
+        'rollback to savepoint push_permissions;reset role;set role service_role;',
+      );
+      const claimed = (
+        await db.query<{ notification_id: string }>(
+          'select * from claim_outbox_for_actor($1,20)',
+          [admin],
+        )
+      ).rows;
+      expect(claimed.map((e) => e.notification_id)).toEqual([own]);
+      expect(
+        (await db.query('select * from claim_outbox_for_actor($1,20)', [admin]))
+          .rows,
+      ).toHaveLength(0);
+      expect(
+        (
+          await db.query<{ state: string }>(
+            'select state from event_outbox where notification_id=$1',
+            [foreign],
+          )
+        ).rows[0].state,
+      ).toBe('pending');
+    });
   });
 });

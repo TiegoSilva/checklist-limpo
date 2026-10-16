@@ -95,6 +95,8 @@ export type Service = {
   completion_note?: string;
 };
 export type Evidence = {
+  mime_type?: string;
+  file_size?: number;
   attempt?: number;
   id: string;
   activity_id: string;
@@ -171,6 +173,8 @@ export type Data = {
   team_agenda: AgendaEntry[];
   agenda_ready?: boolean;
   service_evidence: {
+    mime_type?: string;
+    file_size?: number;
     id: string;
     service_id: string;
     path: string;

@@ -105,7 +105,7 @@ export function executionIssue(
   }
   if (items.some((i) => i.evidence_required) && !hasPhoto)
     return {
-      message: 'Adicione pelo menos uma foto da vistoria antes de enviar.',
+      message: 'Adicione pelo menos uma foto ou vídeo da vistoria antes de enviar.',
     };
   return null;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Camera, Image, X } from 'lucide-react';
+import { Camera, Image, Video, X } from 'lucide-react';
 import type { Evidence } from '../domain';
 import type { ExecutionPhoto } from '../lib/client';
 import { MAX_EXECUTION_PHOTOS } from './execution';
+import { mediaError, isVideo, PHOTO_TYPES, VIDEO_TYPES } from '../lib/media';
 
 function PhotoDraft({ photo }: { photo: ExecutionPhoto }) {
   const [url, setUrl] = useState('');
@@ -11,7 +12,15 @@ function PhotoDraft({ photo }: { photo: ExecutionPhoto }) {
     setUrl(next);
     return () => URL.revokeObjectURL(next);
   }, [photo.file]);
-  return (
+  return isVideo(photo.file.type) ? (
+    <video
+      controls
+      playsInline
+      preload="metadata"
+      src={url}
+      aria-label={photo.file.name || 'Vídeo no rascunho'}
+    />
+  ) : (
     <img src={url} alt={photo.file.name || 'Foto da vistoria no rascunho'} />
   );
 }
@@ -35,18 +44,37 @@ export default function ExecutionPhotos({
   const current = evidence.filter((e) => !e.attempt || e.attempt === attempt);
   const pending = photos.filter((p) => !evidence.some((e) => e.id === p.id));
   const count = current.length + pending.length;
+  const addFiles = (files: File[]) => {
+    if (!files.length) return;
+    if (count + files.length > MAX_EXECUTION_PHOTOS) {
+      onError(
+        'Você pode enviar até 8 arquivos entre fotos e vídeos. Os anteriores foram mantidos.',
+      );
+      return;
+    }
+    const invalid = files.map(mediaError).find(Boolean);
+    if (invalid) {
+      onError(invalid);
+      return;
+    }
+    onError('');
+    onChange([
+      ...photos,
+      ...files.map((file) => ({ id: crypto.randomUUID(), file })),
+    ]);
+  };
   return (
     <section className="room-section execution-photos">
       <h3>
         <Camera size={18} />
-        Fotos da vistoria{' '}
+        Evidências da vistoria{' '}
         <small>
           {count}/{MAX_EXECUTION_PHOTOS}
         </small>
       </h3>
       <p className="muted">
-        Reúna as fotos da execução aqui. Você pode tirar fotos pela câmera ou
-        selecionar imagens, até 8 por envio.
+        Envie fotos ou vídeos. Até 8 arquivos por envio: fotos de até 10 MB ou
+        vídeos de até 50 MB.
       </p>
       <div className="execution-photo-grid">
         {current.map((e, index) => (
@@ -55,21 +83,22 @@ export default function ExecutionPhotos({
             className="button secondary"
             onClick={() => void onView(e)}
           >
-            <Image size={17} />
-            Foto {index + 1} recebida
+            {isVideo(e.mime_type) ? <Video size={17} /> : <Image size={17} />}
+            {isVideo(e.mime_type) ? 'Vídeo' : 'Foto'} {index + 1}
           </button>
         ))}
         {pending.map((photo, index) => (
           <article key={photo.id} className="execution-photo-draft">
             <PhotoDraft photo={photo} />
             <span>
-              Foto {current.length + index + 1} ·{' '}
+              {isVideo(photo.file.type) ? 'Vídeo' : 'Foto'}{' '}
+              {current.length + index + 1} ·{' '}
               {photo.uploaded ? 'Recebida' : 'No rascunho'}
             </span>
             {editable && !photo.uploaded && (
               <button
                 className="icon-button"
-                aria-label={`Remover foto ${current.length + index + 1}`}
+                aria-label={`Remover arquivo ${current.length + index + 1}`}
                 onClick={() =>
                   onChange(photos.filter((p) => p.id !== photo.id))
                 }
@@ -81,48 +110,41 @@ export default function ExecutionPhotos({
         ))}
       </div>
       {editable && (
-        <label className="button secondary file-button">
-          <Camera size={17} />
-          Adicionar fotos ({count}/8)
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            capture="environment"
-            multiple
-            disabled={count >= MAX_EXECUTION_PHOTOS}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              e.target.value = '';
-              if (!files.length) return;
-              if (count + files.length > MAX_EXECUTION_PHOTOS) {
-                onError(
-                  'Você pode enviar até 8 fotos. As fotos anteriores foram mantidas.',
-                );
-                return;
-              }
-              if (
-                files.some(
-                  (f) =>
-                    !['image/jpeg', 'image/png', 'image/webp'].includes(
-                      f.type,
-                    ) || f.size > 10 * 1024 * 1024,
-                )
-              ) {
-                onError('Use fotos JPG, PNG ou WebP de até 10 MB cada.');
-                return;
-              }
-              onError('');
-              onChange([
-                ...photos,
-                ...files.map((file) => ({ id: crypto.randomUUID(), file })),
-              ]);
-            }}
-          />
-        </label>
+        <div className="button-row evidence-inputs">
+          <label className="button secondary file-button">
+            <Camera size={17} />
+            Adicionar fotos ({count}/8)
+            <input
+              type="file"
+              accept={PHOTO_TYPES.join(',')}
+              capture="environment"
+              multiple
+              disabled={count >= MAX_EXECUTION_PHOTOS}
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <label className="button secondary file-button">
+            <Video size={17} />
+            Adicionar vídeo
+            <input
+              type="file"
+              accept={VIDEO_TYPES.join(',')}
+              capture="environment"
+              disabled={count >= MAX_EXECUTION_PHOTOS}
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files ?? []));
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
       )}
       {evidence.some((e) => e.attempt && e.attempt !== attempt) && (
         <details>
-          <summary>Fotos de tentativas anteriores</summary>
+          <summary>Evidências de tentativas anteriores</summary>
           <div className="button-row">
             {evidence
               .filter((e) => e.attempt && e.attempt !== attempt)
@@ -132,7 +154,7 @@ export default function ExecutionPhotos({
                   className="button secondary"
                   onClick={() => void onView(e)}
                 >
-                  Foto anterior {i + 1}
+                  {isVideo(e.mime_type) ? 'Vídeo' : 'Foto'} anterior {i + 1}
                 </button>
               ))}
           </div>

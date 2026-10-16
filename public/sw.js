@@ -1,4 +1,4 @@
-const CACHE = 'aja-shell-v13';
+const CACHE = 'aja-shell-v14';
 self.addEventListener('install', (event) =>
   event.waitUntil(
     caches
@@ -66,7 +66,9 @@ self.addEventListener('push', (event) => {
   }
   event.waitUntil(
     self.registration.showNotification('AJA Anfitrião', {
-      body: 'Você tem uma atualização na sua operação.',
+      body: payload.test
+        ? 'O aparelho recebeu o teste de notificações.'
+        : 'Você tem uma atualização na sua operação.',
       icon: '/icon-192.png',
       badge: '/icon-192.png',
       tag: payload.tag,
@@ -76,5 +78,21 @@ self.addEventListener('push', (event) => {
 });
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(clients.openWindow('/notificacoes'));
+  event.waitUntil(
+    (async () => {
+      const url = new URL('/notificacoes', self.location.origin).href;
+      const windows = await clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+      const existing = windows.find(
+        (client) => new URL(client.url).origin === self.location.origin,
+      );
+      if (existing) {
+        existing.postMessage({ type: 'OPEN_NOTIFICATIONS' });
+        return existing.focus();
+      }
+      return clients.openWindow(url);
+    })(),
+  );
 });

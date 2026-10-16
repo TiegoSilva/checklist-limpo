@@ -4272,3 +4272,153 @@ input[type='checkbox']:checked {
 .execution-modal .required {
   font-size: 0.7rem;
 }
+.execution-start-boundary {
+  position: relative;
+  min-height: 320px;
+}
+.execution-start-boundary.is-locked > .execution-checklist-content {
+  filter: blur(3px);
+  opacity: 0.35;
+  user-select: none;
+  pointer-events: none;
+}
+.execution-start-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: #ffffffc9;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+.execution-start-card {
+  position: sticky;
+  top: 16px;
+  margin: 16px;
+  padding: 24px 16px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px #0000000d;
+}
+.execution-start-card > svg {
+  color: var(--accent);
+  margin: 0 auto 12px;
+}
+.execution-start-card h3 {
+  font-size: 1.1rem;
+  line-height: 1.4;
+}
+.execution-start-card p {
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 12px 0 20px;
+}
+.execution-start-card .button {
+  width: 100%;
+  white-space: normal;
+}
+.execution-footer[hidden] {
+  display: none;
+}
+.execution-photo-draft video,
+.image-viewer video {
+  width: 100%;
+  max-height: 65dvh;
+  background: #171717;
+  border-radius: 12px;
+}
+.execution-photo-draft video {
+  max-height: 220px;
+}
+.evidence-inputs {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.evidence-inputs .file-button {
+  flex: 1;
+  min-width: 130px;
+}
+.device-settings {
+  display: grid;
+  gap: 20px;
+  max-width: 900px;
+}
+.device-card {
+  padding: 20px;
+}
+.device-card-heading {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.device-card-heading .section-icon {
+  flex-shrink: 0;
+}
+.device-card-heading h2 {
+  font-size: 1.15rem;
+  margin-bottom: 6px;
+}
+.device-card-heading p,
+.device-hint,
+.install-instructions {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+.device-status {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.device-status.enabled {
+  color: #28603a;
+}
+.device-card .text-button {
+  margin: 12px 0 0;
+  display: block;
+  min-height: 44px;
+}
+.device-hint {
+  margin-top: 16px;
+}
+.install-instructions {
+  padding: 16px;
+  margin-top: 12px;
+  background: #faf9f7;
+  border-radius: 12px;
+}
+.install-instructions ol {
+  padding-left: 20px;
+  list-style: decimal;
+}
+.install-instructions li + li {
+  margin-top: 8px;
+}
+.install-instructions p {
+  margin-top: 12px;
+}
+.device-card .button-row {
+  flex-wrap: wrap;
+}
+.device-card .button {
+  white-space: normal;
+}
+@media (min-width: 768px) {
+  .execution-start-card {
+    max-width: 440px;
+    margin: 24px auto;
+  }
+  .device-card {
+    padding: 28px;
+  }
+}
+
+.execution-photo-draft:has(video) {
+  grid-column: 1/-1;
+}

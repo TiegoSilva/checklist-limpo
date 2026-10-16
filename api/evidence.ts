@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { detectMedia, mediaError, VIDEO_LIMIT } from '../src/lib/media';
+export const config = { maxDuration: 60 };
 const schema = z.object({
   resource: z.uuid(),
   item: z.string().min(1).max(200).optional(),
@@ -80,34 +82,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res
       .status(422)
       .json({ error: 'Arquivo não encontrado no armazenamento privado' });
-  if (file.size > 10485760)
-    return res.status(422).json({ error: 'Limite de 10 MB excedido' });
+  if (file.size > VIDEO_LIMIT)
+    return res.status(422).json({ error: 'Limite de 50 MB excedido' });
   const buffer = Buffer.from(await file.arrayBuffer());
-  const supported =
-    buffer.subarray(0, 3).equals(Buffer.from([255, 216, 255])) ||
-    buffer
-      .subarray(0, 8)
-      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-    (buffer.toString('ascii', 0, 4) === 'RIFF' &&
-      buffer.toString('ascii', 8, 12) === 'WEBP');
-  if (!supported)
+  const mediaType = detectMedia(buffer);
+  if (!mediaType)
     return res
       .status(422)
-      .json({ error: 'O arquivo não é uma imagem JPG, PNG ou WebP válida' });
+      .json({
+        error:
+          'Arquivo inválido. Use foto JPG, PNG ou WebP ou vídeo MP4, MOV ou WebM.',
+      });
+  const invalid = mediaError({ type: mediaType, size: file.size });
+  if (invalid) return res.status(422).json({ error: invalid });
   const hash = createHash('sha256').update(buffer).digest('hex');
-  const { error: receiptError } = await server.rpc(
-    activity ? 'receive_evidence' : 'receive_service_evidence',
-    {
-      actor: user.id,
-      ...(activity
-        ? { activity: body.resource, item: body.item ?? '__activity__' }
-        : { service: body.resource }),
-      file_id: body.file_id,
-      hash,
-    },
-  );
+  const { error: receiptError } = await server.rpc('receive_media_evidence', {
+    actor: user.id,
+    resource: body.resource,
+    kind: body.kind,
+    item: body.item ?? '__activity__',
+    file_id: body.file_id,
+    hash,
+    media_type: mediaType,
+    bytes: file.size,
+  });
   if (receiptError)
-    return res.status(422).json({ error: receiptError.message });
+    return res
+      .status(422)
+      .json({
+        error:
+          receiptError.code === 'PGRST202'
+            ? 'Aplique a migração 202610160013_video_and_device_push.sql no Supabase para receber fotos e vídeos.'
+            : receiptError.message,
+      });
   return res
     .status(200)
     .json({ file_id: body.file_id, sha256: hash, confirmed: true });

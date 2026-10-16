@@ -5,16 +5,37 @@ import webpush from 'web-push';
 export const config = { maxDuration: 60 };
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'GET')
+  if (!['GET', 'POST'].includes(req.method ?? ''))
     return res.status(405).json({ error: 'Método não permitido' });
   const actual = Buffer.from(req.headers.authorization ?? '');
   const expected = Buffer.from(`Bearer ${process.env.CRON_SECRET ?? ''}`);
-  if (
-    !process.env.CRON_SECRET ||
-    actual.length !== expected.length ||
-    !timingSafeEqual(actual, expected)
-  )
-    return res.status(401).json({ error: 'Não autorizado' });
+  const cron =
+    req.method === 'GET' &&
+    Boolean(process.env.CRON_SECRET) &&
+    actual.length === expected.length &&
+    timingSafeEqual(actual, expected);
+  let actor: string | null = null;
+  if (!cron) {
+    if (
+      req.method !== 'POST' ||
+      !req.headers.authorization?.startsWith('Bearer ')
+    )
+      return res.status(401).json({ error: 'Não autorizado' });
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY)
+      return res.status(503).json({ error: 'Servidor não configurado' });
+    const authClient = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      { auth: { persistSession: false } },
+    );
+    const {
+      data: { user },
+      error,
+    } = await authClient.auth.getUser(req.headers.authorization.slice(7));
+    if (error || !user)
+      return res.status(401).json({ error: 'Sessão inválida' });
+    actor = user.id;
+  }
   const {
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -36,9 +57,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { persistSession: false },
   });
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-  const { data: events, error } = await client.rpc('claim_outbox', {
-    batch_size: 20,
-  });
+  if (actor) {
+    const { data: profile } = await client
+      .from('profiles')
+      .select('active')
+      .eq('id', actor)
+      .single();
+    if (!profile?.active)
+      return res.status(403).json({ error: 'Perfil desativado' });
+    if (req.body?.test_endpoint !== undefined) {
+      if (
+        typeof req.body.test_endpoint !== 'string' ||
+        req.body.test_endpoint.length > 2048
+      )
+        return res.status(400).json({ error: 'Dispositivo inválido' });
+      const { data: sub } = await client
+        .from('push_subscriptions')
+        .select('id,endpoint,keys')
+        .eq('user_id', actor)
+        .eq('endpoint', req.body.test_endpoint)
+        .eq('active', true)
+        .maybeSingle();
+      if (!sub)
+        return res
+          .status(404)
+          .json({
+            error:
+              'Este aparelho não está vinculado. Ative as notificações novamente.',
+          });
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: sub.keys },
+          JSON.stringify({
+            tag: 'device-test',
+            body: 'O aparelho recebeu o teste de notificações.',
+            test: true,
+          }),
+          { TTL: 60, timeout: 5000 },
+        );
+        return res.status(200).json({ sent: true });
+      } catch (e) {
+        const status = (e as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410)
+          await client
+            .from('push_subscriptions')
+            .update({ active: false })
+            .eq('id', sub.id);
+        return res
+          .status(502)
+          .json({
+            error:
+              'O provedor não confirmou o envio. Reative as notificações e tente novamente.',
+          });
+      }
+    }
+  }
+  const { data: events, error } = await client.rpc(
+    actor ? 'claim_outbox_for_actor' : 'claim_outbox',
+    { batch_size: 20, ...(actor ? { actor } : {}) },
+  );
   if (error)
     return res
       .status(500)
@@ -48,7 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let failure: string | null = null;
     const { data: notice, error: noticeError } = await client
       .from('notifications')
-      .select('recipient,activity_id')
+      .select('recipient,activity_id,read_at')
       .eq('id', event.notification_id)
       .single();
     if (noticeError) failure = 'Notificação não encontrada';
@@ -64,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('user_id', notice.recipient)
         .eq('active', true);
       if (subError) failure = 'Falha ao consultar dispositivos';
-      if (profile?.active)
+      if (profile?.active && !notice.read_at)
         for (const sub of subscriptions ?? []) {
           const { data: delivered } = await client
             .from('notification_deliveries')
@@ -105,17 +182,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 .update({ active: false })
                 .eq('id', sub.id);
             else failure = `Provedor push: ${status ?? 'rede indisponível'}`;
-            await client
-              .from('notification_deliveries')
-              .upsert(
-                {
-                  notification_id: event.notification_id,
-                  subscription_id: sub.id,
-                  state: 'failed',
-                  error: `HTTP ${status ?? 0}`,
-                },
-                { onConflict: 'notification_id,subscription_id' },
-              );
+            await client.from('notification_deliveries').upsert(
+              {
+                notification_id: event.notification_id,
+                subscription_id: sub.id,
+                state: 'failed',
+                error: `HTTP ${status ?? 0}`,
+              },
+              { onConflict: 'notification_id,subscription_id' },
+            );
           }
         }
     }

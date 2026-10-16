@@ -1,8 +1,10 @@
+import { mediaError } from './media';
 import { createClient } from '@supabase/supabase-js';
 import { openDB } from 'idb';
 import { emptyData, type Data, type Response } from '../domain';
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+let pushWake: ReturnType<typeof setTimeout> | undefined;
 export const configured = Boolean(url && key && !url.includes('SEU-PROJETO'));
 export const supabase = configured ? createClient(url, key) : null;
 export async function loadData(): Promise<Data> {
@@ -132,6 +134,29 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     }
     throw new Error(error.message);
   }
+  if (
+    import.meta.env.VITE_VAPID_PUBLIC_KEY &&
+    !['read_notification', 'unsubscribe_push'].includes(name)
+  ) {
+    const wake = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session)
+          await fetch('/api/notifications', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${session.access_token}` },
+            keepalive: true,
+          });
+      } catch {
+        /* A gravação já foi confirmada; a fila mantém a entrega para nova tentativa. */
+      }
+    };
+    void wake();
+    clearTimeout(pushWake);
+    pushWake = setTimeout(() => void wake(), 16000);
+  }
   return data;
 }
 export type Draft = {
@@ -182,11 +207,8 @@ export async function uploadPhoto(
   fileId?: string,
 ) {
   if (!supabase) throw new Error('Configure o Supabase.');
-  if (
-    !['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ||
-    file.size > 10 * 1024 * 1024
-  )
-    throw new Error('Use uma foto JPG, PNG ou WebP de até 10 MB.');
+  const invalid = mediaError(file);
+  if (invalid) throw new Error(invalid);
   const id = fileId ?? crypto.randomUUID();
   const path = `${resource}/${id}`;
   const { error } = await supabase.storage
@@ -211,17 +233,18 @@ export async function uploadPhoto(
   if (!receipt.ok)
     throw new Error(
       result.error ??
-        'A foto foi enviada, mas não foi confirmada. Tente novamente.',
+        'O arquivo foi enviado, mas não foi confirmado. Tente novamente.',
     );
 }
 export async function signedImage(
   bucket: 'references' | 'evidence' | 'service-evidence',
   path: string,
+  expires = 120,
 ) {
   if (!supabase) throw new Error('Configure o Supabase.');
   const { data, error } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(path, 120);
+    .createSignedUrl(path, expires);
   if (error) throw error;
   return data.signedUrl;
 }

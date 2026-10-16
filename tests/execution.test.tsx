@@ -105,7 +105,8 @@ describe('execução simplificada e retomada', () => {
         onView={vi.fn()}
       />,
     );
-    expect(photos.match(/type="file"/g)).toHaveLength(1);
+    expect(photos.match(/type="file"/g)).toHaveLength(2);
+    expect(photos).toContain('Adicionar vídeo');
     expect(photos).toContain('capture="environment"');
     expect(photos).toContain('multiple=""');
     expect(photos).toContain('0/8');
