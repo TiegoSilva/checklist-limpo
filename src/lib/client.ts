@@ -76,6 +76,11 @@ export async function rpc(name: string, args: Record<string, unknown> = {}) {
     );
   const { data, error } = await supabase.rpc(name, args);
   if (error) {
+    if (name === 'save_inventory_item' && error.code === 'PGRST202') {
+      throw new Error(
+        'Atualização do inventário pendente. Aplique a migração 202610160014_inventory_links.sql no Supabase para cadastrar e editar os itens vinculados às unidades.',
+      );
+    }
     if (
       ['activity_action', 'service_action', 'manage_work_order'].includes(
         name,

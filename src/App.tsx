@@ -32,7 +32,6 @@ import {
   X,
   AlertTriangle,
   LoaderCircle,
-  SlidersHorizontal,
   Smartphone,
   Building2,
 } from 'lucide-react';
@@ -57,6 +56,11 @@ import LoginPage from './features/LoginPage';
 import ChecklistCatalog from './features/ChecklistCatalog';
 import ChecklistPreviewDialog from './features/ChecklistPreview';
 import InventoryEditor from './features/InventoryEditor';
+import InventoryCatalog from './features/InventoryCatalog';
+import {
+  inventoryManagementScope,
+  type InventoryItem,
+} from './features/inventory';
 import StayAgenda from './features/StayAgenda';
 import WorkOrderEditor from './features/WorkOrderEditor';
 import TodayStayOrders from './features/TodayStayOrders';
@@ -143,11 +147,27 @@ function Portal({ session }: { session: Session }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<string | null>(null);
   const [selectedUnit, setSelectedUnit] = useState('');
+  const [inventoryItem, setInventoryItem] = useState<InventoryItem>();
+  const [inventoryInitialUnit, setInventoryInitialUnit] = useState('');
   const [service, setService] = useState<Service | null>(null);
   const [calendar, setCalendar] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const path = location.pathname;
+  const inventoryUnit =
+    path === '/inventario'
+      ? (new URLSearchParams(location.search).get('unidade') ?? '')
+      : '';
+  const changeInventoryUnit = (id: string) =>
+    navigate({
+      pathname: '/inventario',
+      search: id ? `?unidade=${encodeURIComponent(id)}` : '',
+    });
+  const openInventory = (unit = '', item?: InventoryItem) => {
+    setInventoryInitialUnit(unit);
+    setInventoryItem(item);
+    setModal('inventory');
+  };
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const openNotices = (event: MessageEvent) => {
@@ -178,6 +198,7 @@ function Portal({ session }: { session: Session }) {
     m.roles.some((r) => r === 'admin' || r === 'manager'),
   );
   const admin = memberships.some((m) => m.roles.includes('admin'));
+  const inventoryManagementData = inventoryManagementScope(data, user);
   useEffect(() => {
     if (
       session &&
@@ -346,6 +367,9 @@ function Portal({ session }: { session: Session }) {
   const active = selected
     ? data.activities.find((a) => a.id === selected)
     : null;
+  const propertyUnits = data.units.filter(
+    (u) => !property || u.property_id === property,
+  );
   const counts = {
     pending:
       visible.filter(
@@ -358,11 +382,7 @@ function Portal({ session }: { session: Session }) {
       daily.filter((a) => a.status === 'completed').length +
       dailyTasks.filter((s) => s.status === 'approved').length,
     review: approvals.length + taskApprovals.length,
-    ready: data.units.filter(
-      (u) =>
-        (!property || u.property_id === property) &&
-        u.operational_status === 'ready',
-    ).length,
+    ready: propertyUnits.filter((u) => u.operational_status === 'ready').length,
   };
   const notifications = data.notifications.filter((n) => !n.read_at).length;
   const options = {
@@ -625,14 +645,16 @@ function Portal({ session }: { session: Session }) {
           {path !== '/checklists' && (
             <div className="page-intro">
               <div>
-                <div className="eyebrow">
-                  {new Intl.DateTimeFormat('pt-BR', {
-                    weekday: 'long',
-                    day: 'numeric',
-                    month: 'long',
-                    timeZone: 'America/Sao_Paulo',
-                  }).format(new Date())}
-                </div>
+                {path === '/' && (
+                  <div className="eyebrow">
+                    {new Intl.DateTimeFormat('pt-BR', {
+                      weekday: 'long',
+                      day: 'numeric',
+                      month: 'long',
+                      timeZone: 'America/Sao_Paulo',
+                    }).format(new Date())}
+                  </div>
+                )}
                 <h1>{headTitle}</h1>
                 <p>
                   {path === '/'
@@ -641,7 +663,21 @@ function Portal({ session }: { session: Session }) {
                       ? 'Tudo o que você precisa fazer, em um só lugar.'
                       : path === '/aprovacoes'
                         ? 'Seu olhar é a última etapa antes de receber bem.'
-                        : 'Organização, clareza e cuidado em cada etapa.'}
+                        : path === '/inventario'
+                          ? 'Cada item no seu lugar: propriedade, unidade e ambiente.'
+                          : path === '/propriedades'
+                            ? 'Unidades, ambientes e inventário de cada propriedade.'
+                            : path === '/servicos'
+                              ? 'Programe e acompanhe check-ins, checkouts e tarefas.'
+                              : path === '/atividades'
+                                ? 'Acompanhe a programação e abra uma ordem para executar.'
+                                : path === '/relatorios'
+                                  ? 'Consulte os resultados e exporte o período desejado.'
+                                  : path === '/equipe'
+                                    ? 'Gerencie responsáveis, funções e acessos.'
+                                    : path === '/auditoria'
+                                      ? 'Consulte o histórico das alterações na operação.'
+                                      : ''}
                 </p>
               </div>
               {manager &&
@@ -656,7 +692,11 @@ function Portal({ session }: { session: Session }) {
                 ].includes(path) && (
                   <button
                     className="button primary"
-                    onClick={() => open(actionModal)}
+                    onClick={() =>
+                      actionModal === 'inventory'
+                        ? openInventory(inventoryUnit)
+                        : open(actionModal)
+                    }
                   >
                     <Plus size={18} />
                     {actionLabel}
@@ -727,21 +767,34 @@ function Portal({ session }: { session: Session }) {
             '/relatorios',
           ].includes(path) && (
             <div className="filter-bar">
-              <label className="search-input">
-                <Search size={17} />
-                <input
-                  aria-label="Buscar na operação"
-                  placeholder="Buscar propriedade, atividade ou pessoa…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </label>
+              {path !== '/relatorios' && (
+                <label className="search-input">
+                  <Search size={17} />
+                  <input
+                    aria-label={
+                      path === '/inventario'
+                        ? 'Buscar no inventário'
+                        : 'Buscar na operação'
+                    }
+                    placeholder={
+                      path === '/inventario'
+                        ? 'Buscar item, ambiente, unidade ou propriedade…'
+                        : 'Buscar propriedade, atividade ou pessoa…'
+                    }
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </label>
+              )}
               <label className="select-filter">
                 <House size={16} />
                 <select
                   aria-label="Filtrar empreendimento"
                   value={property}
-                  onChange={(e) => setProperty(e.target.value)}
+                  onChange={(e) => {
+                    setProperty(e.target.value);
+                    if (path === '/inventario') changeInventoryUnit('');
+                  }}
                 >
                   <option value="">Todos os empreendimentos</option>
                   {options.properties.map((p) => (
@@ -751,10 +804,6 @@ function Portal({ session }: { session: Session }) {
                   ))}
                 </select>
               </label>
-              <span className="filter-end">
-                <SlidersHorizontal size={16} />
-                Filtros
-              </span>
             </div>
           )}
           {path === '/' && (
@@ -899,13 +948,13 @@ function Portal({ session }: { session: Session }) {
                     </div>
                     <div className="property-total">
                       <strong>
-                        {data.units.length.toString().padStart(2, '0')}
+                        {propertyUnits.length.toString().padStart(2, '0')}
                       </strong>
                       <span>unidades na operação</span>
                     </div>
                     <div className="segmented-bar">
-                      {data.units.length ? (
-                        data.units.map((u) => (
+                      {propertyUnits.length ? (
+                        propertyUnits.map((u) => (
                           <span
                             className={`segment-${u.operational_status}`}
                             key={u.id}
@@ -924,21 +973,21 @@ function Portal({ session }: { session: Session }) {
                         },
                         {
                           label: 'Em preparação',
-                          value: data.units.filter(
+                          value: propertyUnits.filter(
                             (u) => u.operational_status === 'preparing',
                           ).length,
                           color: 'gold',
                         },
                         {
                           label: 'Aguardando revisão',
-                          value: data.units.filter(
+                          value: propertyUnits.filter(
                             (u) => u.operational_status === 'review',
                           ).length,
                           color: 'orange',
                         },
                         {
                           label: 'Indisponíveis',
-                          value: data.units.filter((u) =>
+                          value: propertyUnits.filter((u) =>
                             ['unavailable', 'adjustment'].includes(
                               u.operational_status,
                             ),
@@ -961,36 +1010,6 @@ function Portal({ session }: { session: Session }) {
                       <ArrowRight size={16} />
                     </NavLink>
                   </section>
-                  <section className="care-card">
-                    <span className="care-house">
-                      <House size={33} />
-                      <Sparkles size={18} />
-                    </span>
-                    <div className="eyebrow">O JEITO AJA DE RECEBER</div>
-                    <h2>
-                      Uma boa estadia
-                      <br />
-                      começa nos detalhes.
-                    </h2>
-                    <p>
-                      Vistoriar, cuidar, conferir.
-                      <br />
-                      Sua equipe conectada em cada etapa.
-                    </p>
-                    <div className="care-steps">
-                      <Check size={13} /> Cuidado <span>·</span>
-                      <Check size={13} /> Confiança
-                    </div>
-                  </section>
-                  <div className="audit-note">
-                    <ShieldCheck size={19} />
-                    <p>
-                      <strong>Uma operação com memória.</strong>
-                      <br />
-                      Ações críticas ficam registradas com responsável e horário
-                      oficial.
-                    </p>
-                  </div>
                 </aside>
               </div>
             </>
@@ -1221,62 +1240,32 @@ function Portal({ session }: { session: Session }) {
             </section>
           )}
           {path === '/inventario' && (
-            <section className="panel">
-              <div className="section-heading">
-                <h2>Patrimônio, enxoval e consumo</h2>
-                <ListChecks size={20} />
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Item</th>
-                      <th>Unidade / ambiente</th>
-                      <th>Categoria</th>
-                      <th>Quantidade padrão</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.inventory_items
-                      .filter(
-                        (i) =>
-                          (!property ||
-                            data.units.find((u) => u.id === i.unit_id)
-                              ?.property_id === property) &&
-                          i.name.toLowerCase().includes(search.toLowerCase()),
-                      )
-                      .map((i) => (
-                        <tr key={i.id}>
-                          <td>
-                            <strong>{i.name}</strong>
-                          </td>
-                          <td>
-                            {unitName(i.unit_id)} · {i.room}
-                          </td>
-                          <td>
-                            {
-                              {
-                                permanent: 'Patrimônio',
-                                linen: 'Enxoval',
-                                consumable: 'Consumo',
-                              }[i.category]
-                            }
-                          </td>
-                          <td>{i.expected} un.</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-              {!data.inventory_items.length && (
-                <Empty
-                  title="Conheça cada detalhe do seu patrimônio"
-                  description="Cadastre itens por ambiente. As quantidades serão conferidas explicitamente durante a vistoria."
-                  action={() => open('inventory')}
-                  label="Cadastrar item"
-                />
-              )}
-            </section>
+            <InventoryCatalog
+              data={data}
+              property={property}
+              unit={inventoryUnit}
+              search={search}
+              manager={manager}
+              canManageUnit={(id) =>
+                inventoryManagementData.units.some((u) => u.id === id)
+              }
+              onUnitChange={changeInventoryUnit}
+              onClearFilters={() => {
+                setSearch('');
+                setProperty('');
+                changeInventoryUnit('');
+              }}
+              onCreate={openInventory}
+              onEdit={(item) => openInventory(item.unit_id, item)}
+              onOpenUnit={(id) => {
+                setSelectedUnit(id);
+                setModal('unit-detail');
+              }}
+              onOpenProperty={(id) => {
+                setProperty(id);
+                setSearch('');
+              }}
+            />
           )}
           {path === '/checklists' && (
             <ChecklistCatalog
@@ -1660,7 +1649,28 @@ function Portal({ session }: { session: Session }) {
       )}
       {modal === 'unit-detail' && (
         <Modal title={unitName(selectedUnit)} onClose={() => setModal(null)}>
-          <p>Ambientes cadastrados</p>
+          <p className="modal-description">{propertyName(selectedUnit)}</p>
+          <NavLink
+            className="button secondary full unit-inventory-link"
+            to={`/inventario?unidade=${encodeURIComponent(selectedUnit)}`}
+            onClick={() => {
+              setProperty('');
+              setSearch('');
+              setModal(null);
+            }}
+          >
+            <ListChecks size={18} /> Ver inventário
+            <span className="count-pill">
+              {
+                data.inventory_items.filter(
+                  (i) => i.unit_id === selectedUnit && i.active !== false,
+                ).length
+              }{' '}
+              itens
+            </span>
+            <ArrowRight size={17} />
+          </NavLink>
+          <h3>Ambientes</h3>
           {data.environments
             .filter((e) => e.unit_id === selectedUnit)
             .map((e) => (
@@ -1669,22 +1679,31 @@ function Portal({ session }: { session: Session }) {
                 {e.name}
               </div>
             ))}
-          <Form
-            fields={[{ name: 'name', label: 'Novo ambiente' }]}
-            submit="Adicionar ambiente"
-            onSubmit={async (v) => {
-              await run(() =>
-                rpc('configure', {
-                  action: 'environment',
-                  payload: { ...v, unit_id: selectedUnit },
-                }),
-              );
-            }}
-          />
+          {manager && (
+            <Form
+              fields={[{ name: 'name', label: 'Novo ambiente' }]}
+              submit="Adicionar ambiente"
+              onSubmit={async (v) => {
+                await run(() =>
+                  rpc('configure', {
+                    action: 'environment',
+                    payload: { ...v, unit_id: selectedUnit },
+                  }),
+                );
+              }}
+            />
+          )}
         </Modal>
       )}
       {modal === 'inventory' && (
-        <InventoryEditor data={data} run={run} onClose={() => setModal(null)} />
+        <InventoryEditor
+          data={inventoryManagementData}
+          item={inventoryItem}
+          initialUnit={inventoryInitialUnit}
+          initialProperty={property}
+          run={run}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal === 'member' && (
         <MemberEditor data={data} run={run} onClose={() => setModal(null)} />

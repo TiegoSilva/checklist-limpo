@@ -83,10 +83,10 @@ O consumidor usa leases, limite de lote, até oito tentativas, backoff e registr
 - Manifest, ícones PNG 192/512 e service worker. Instalação depende do navegador.
 - Cache de recursos estáticos e shell; APIs, fotos e respostas autenticadas não entram no cache HTTP.
 - Snapshot mínimo das atividades atribuídas e rascunhos ficam em IndexedDB, separados pelo ID do usuário. Dados de hóspedes, auditoria e notificações não são copiados para esse snapshot.
-- Respostas alteradas têm rascunho automático local. O usuário envia explicitamente o progresso e a conclusão ao servidor.
+- Respostas alteradas têm rascunho automático local. O usuário salva o rascunho localmente e envia explicitamente o checklist para aprovação.
 - Rascunho com revisão divergente não é reaplicado automaticamente. O servidor rejeita revisão antiga.
 - Logout remove rascunhos e snapshots locais. Em dispositivos compartilhados, faça logout. IndexedDB não protege contra acesso ao perfil desbloqueado do sistema operacional.
-- Fotografias exigem conexão. Não há fila offline de arquivos.
+- Fotos e vídeos exigem conexão. Não há fila offline de arquivos.
 - A atualização do service worker aguarda o ciclo normal de abas; não força recarga durante uma execução. Para liberar alterações de política de cache, incremente `CACHE` em `public/sw.js`.
 
 ## Estrutura e documentação
@@ -126,3 +126,8 @@ Execução simplificada, fotos gerais (até 8), envio com retomada e gestão de 
 Para ativar a aprovação da própria execução por gestores, aplique uma vez `supabase/migrations/202610150012_manager_review.sql`, depois da 011. A migração não foi aplicada no projeto remoto nesta entrega.
 
 Fotos e vídeos, bloqueio antes do início e configuração por aparelho: aplique uma vez `supabase/migrations/202610160013_video_and_device_push.sql` após a 012 e publique frontend e APIs juntos. Guia em [App e notificações](docs/APP_E_NOTIFICACOES.md).
+
+
+Inventário vinculado às propriedades e unidades: aplique uma vez `supabase/migrations/202610160014_inventory_links.sql` após a 013, antes de publicar este frontend. O cadastro usa Propriedade → Unidade; a consulta mostra o mesmo caminho, permite editar e oferece acesso ao inventário pela unidade. A propriedade é derivada da unidade, sem duplicar a relação no banco. Alterações no inventário não modificam modelos publicados ou ordens existentes. A migração ainda precisa ser aplicada no projeto remoto.
+
+A avaliação funcional e de usabilidade está em [Relatório de avaliação do sistema — 16/10/2026](docs/AVALIACAO_DO_SISTEMA_2026-10-16.md), com as melhorias entregues, propostas priorizadas e critérios para avaliá-las.

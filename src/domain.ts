@@ -199,6 +199,8 @@ export type Data = {
     room: string;
     category: string;
     expected: number;
+    revision?: number;
+    active?: boolean;
   }[];
   checklist_template_versions: {
     id: string;

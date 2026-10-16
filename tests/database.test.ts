@@ -3373,3 +3373,265 @@ describe.sequential('vídeos e fila de notificações por organização', () => 
     });
   });
 });
+
+describe.sequential('inventário por unidade e propriedade', () => {
+  const payload = (unit_id: string, patch: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      unit_id,
+      name: 'Toalhas novas',
+      room: 'Banheiro',
+      category: 'linen',
+      expected: 4,
+      ...patch,
+    });
+  async function rejected(args: string, pattern: RegExp) {
+    await db.exec('savepoint inventory_validation');
+    await expect(rpc('save_inventory_item', [args])).rejects.toThrow(pattern);
+    await db.exec('rollback to savepoint inventory_validation');
+  }
+  it('deriva a propriedade da unidade, inclui a revisão e impede escrita direta', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const id = await rpc('configure', [
+        'inventory',
+        payload(unit, { property_id: crypto.randomUUID() }),
+      ]);
+      const row = (
+        await db.query<{ property_id: string; revision: number }>(
+          'select u.property_id,i.revision from inventory_items i join units u on u.id=i.unit_id where i.id=$1',
+          [id],
+        )
+      ).rows[0];
+      expect(row).toEqual({ property_id: property, revision: 0 });
+      await db.exec('savepoint direct_inventory');
+      await expect(
+        db.query('update inventory_items set expected=9 where id=$1', [id]),
+      ).rejects.toThrow(/permission denied/);
+      await db.exec('rollback to savepoint direct_inventory');
+      const audit = (
+        await db.query<{ event: string; property_id: string }>(
+          'select event,property_id from audit_events where resource_id=$1',
+          [id],
+        )
+      ).rows;
+      expect(audit).toContainEqual({
+        event: 'inventory.created',
+        property_id: property,
+      });
+    });
+  });
+  it('edita e move um item sem modificar os snapshots de checklist, com auditoria nos dois locais', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const otherProperty = (await rpc('configure', [
+        'property',
+        JSON.stringify({ org_id: org, name: 'Destino de inventário' }),
+      ])) as string;
+      const otherUnit = (await rpc('configure', [
+        'unit',
+        JSON.stringify({
+          property_id: otherProperty,
+          name: 'Unidade destino',
+          capacity: 4,
+          base_occupancy: 2,
+        }),
+      ])) as string;
+      const id = await rpc('save_inventory_item', [payload(unit)]);
+      const snapshotBefore = (
+        await db.query(
+          'select id,items from checklist_template_versions order by id',
+        )
+      ).rows;
+      await rpc('save_inventory_item', [
+        payload(otherUnit, {
+          id,
+          revision: 0,
+          name: 'Toalhas atualizadas',
+          expected: 6,
+        }),
+      ]);
+      expect(
+        (
+          await db.query<{
+            unit_id: string;
+            name: string;
+            expected: number;
+            revision: number;
+          }>(
+            'select unit_id,name,expected,revision from inventory_items where id=$1',
+            [id],
+          )
+        ).rows[0],
+      ).toEqual({
+        unit_id: otherUnit,
+        name: 'Toalhas atualizadas',
+        expected: 6,
+        revision: 1,
+      });
+      expect(
+        (
+          await db.query(
+            'select id,items from checklist_template_versions order by id',
+          )
+        ).rows,
+      ).toEqual(snapshotBefore);
+      const audit = (
+        await db.query<{
+          property_id: string;
+          event: string;
+          before_data: { unit_id: string };
+          after_data: { unit_id: string };
+        }>(
+          'select property_id,event,before_data,after_data from audit_events where resource_id=$1 and before_data is not null',
+          [id],
+        )
+      ).rows;
+      expect(audit).toHaveLength(2);
+      expect(audit.map((e) => e.property_id).sort()).toEqual(
+        [property, otherProperty].sort(),
+      );
+      expect(
+        audit.every(
+          (e) =>
+            e.before_data.unit_id === unit &&
+            e.after_data.unit_id === otherUnit,
+        ),
+      ).toBe(true);
+    });
+  });
+  it('exige autorização tanto na unidade de origem quanto na de destino', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const hiddenProperty = (await rpc('configure', [
+        'property',
+        JSON.stringify({
+          org_id: org,
+          name: 'Propriedade sem acesso do gestor',
+        }),
+      ])) as string;
+      const hiddenUnit = (await rpc('configure', [
+        'unit',
+        JSON.stringify({
+          property_id: hiddenProperty,
+          name: 'Unidade privada',
+          capacity: 4,
+          base_occupancy: 2,
+        }),
+      ])) as string;
+      const own = await rpc('save_inventory_item', [payload(unit)]);
+      const hidden = await rpc('save_inventory_item', [payload(hiddenUnit)]);
+      await asUser(worker);
+      await rejected(
+        payload(hiddenUnit, { id: own, revision: 0 }),
+        /acesso negado/i,
+      );
+      await rejected(
+        payload(unit, { id: hidden, revision: 0 }),
+        /acesso negado/i,
+      );
+      await rejected(payload(crypto.randomUUID()), /acesso negado/i);
+      expect(
+        (await db.query('select id from inventory_items where id=$1', [hidden]))
+          .rows,
+      ).toHaveLength(0);
+      // Também rejeita funções operacionais com acesso de leitura à unidade.
+      await db.exec('reset role');
+      await db.query(
+        "update memberships set roles=array['cleaner'] where org_id=$1 and user_id=$2",
+        [org, worker],
+      );
+      await asUser(worker);
+      await rejected(payload(unit), /acesso negado/i);
+    });
+  });
+  it('preserva a edição mais recente e rejeita versão antiga ou ausente', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      const id = await rpc('save_inventory_item', [payload(unit)]);
+      await rpc('save_inventory_item', [
+        payload(unit, { id, revision: 0, expected: 7 }),
+      ]);
+      await rejected(
+        payload(unit, { id, revision: 0, expected: 9 }),
+        /alterado por outra pessoa/,
+      );
+      await rejected(
+        payload(unit, { id, expected: 9 }),
+        /alterado por outra pessoa/,
+      );
+      expect(
+        (
+          await db.query<{ expected: number }>(
+            'select expected from inventory_items where id=$1',
+            [id],
+          )
+        ).rows[0].expected,
+      ).toBe(7);
+    });
+  });
+  it('valida os campos também no servidor e não aceita item sem unidade', async () => {
+    await rollbackAfter(async () => {
+      await asUser(admin);
+      await rejected(payload(unit, { unit_id: null }), /acesso negado/i);
+      await rejected(payload(unit, { name: '   ' }), /nome/);
+      await rejected(payload(unit, { expected: -1 }), /inteiro/);
+      await rejected(payload(unit, { expected: 1.5 }), /inteiro/);
+      await rejected(payload(unit, { expected: 10000 }), /inteiro/);
+      await rejected(payload(unit, { expected: null }), /Quantidade/);
+      await rejected(payload(unit, { category: 'outra' }), /Categoria/);
+      const id = await rpc('save_inventory_item', [
+        payload(unit, { expected: 0, room: '' }),
+      ]);
+      expect(
+        (
+          await db.query<{ expected: number; room: string }>(
+            'select expected,room from inventory_items where id=$1',
+            [id],
+          )
+        ).rows[0],
+      ).toEqual({ expected: 0, room: 'Geral' });
+    });
+  });
+  it('não permite transferir um item para outra organização, mesmo com acesso às duas', async () => {
+    await rollbackAfter(async () => {
+      const foreignOwner = crypto.randomUUID();
+      await db.exec('reset role');
+      await db.query('insert into auth.users values($1,$2)', [
+        foreignOwner,
+        'inventory-owner@aja.test',
+      ]);
+      await asUser(foreignOwner);
+      const foreignOrg = await rpc('bootstrap', [
+        'Outra organização de inventário',
+        'Gestor externo',
+      ]);
+      const foreignProperty = (await rpc('configure', [
+        'property',
+        JSON.stringify({
+          org_id: foreignOrg,
+          name: 'Organização de destino',
+        }),
+      ])) as string;
+      const foreignUnit = (await rpc('configure', [
+        'unit',
+        JSON.stringify({
+          property_id: foreignProperty,
+          name: 'Unidade externa',
+          capacity: 2,
+          base_occupancy: 2,
+        }),
+      ])) as string;
+      await db.exec('reset role');
+      await db.query(
+        "insert into memberships(org_id,user_id,roles) values($1,$2,array['admin']) on conflict (org_id,user_id) do update set roles=array['admin']",
+        [foreignOrg, admin],
+      );
+      await asUser(admin);
+      const id = await rpc('save_inventory_item', [payload(unit)]);
+      await rejected(
+        payload(foreignUnit, { id, revision: 0 }),
+        /mesma organização/,
+      );
+    });
+  });
+});
